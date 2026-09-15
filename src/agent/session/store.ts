@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid'
 import type { VirtualFS } from '../fs/types'
 import { createMemoryFS } from '../fs/memory-fs'
 import { normalizePath } from '../fs/paths'
+import { fsaDelete, fsaWrite } from '../fs/fsa-sync'
 
 export type ChatRole = 'user' | 'assistant' | 'system'
 
@@ -87,6 +88,10 @@ type AgentState = {
   lastDiff: LastDiff | null
   pendingQuestion: PendingQuestion | null
   hydrated: boolean
+  fsaRoot: FileSystemDirectoryHandle | null
+  fsaName: string | null
+  mcpServers: Array<{ name: string; url: string; connected: boolean }>
+  mcpToolDefs: import('ai').ToolSet
 
   selectFile: (path: string) => void
   setFileContent: (path: string, content: string) => void
@@ -116,6 +121,10 @@ type AgentState = {
   }) => void
   resetWorkspace: () => void
   setHydrated: (value: boolean) => void
+  setFsaRoot: (handle: FileSystemDirectoryHandle | null, name?: string | null) => void
+  loadFilesFromMap: (files: Record<string, string>) => void
+  setMcpServers: (servers: Array<{ name: string; url: string; connected: boolean }>) => void
+  setMcpToolDefs: (tools: import('ai').ToolSet) => void
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
@@ -131,12 +140,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   lastDiff: null,
   pendingQuestion: null,
   hydrated: false,
+  fsaRoot: null,
+  fsaName: null,
+  mcpServers: [],
+  mcpToolDefs: {},
 
   selectFile: (path) => set({ selectedPath: normalizePath(path) }),
 
   setFileContent: (path, content) => {
     const key = normalizePath(path)
     set((s) => ({ files: { ...s.files, [key]: content } }))
+    const root = get().fsaRoot
+    if (root) void fsaWrite(root, key, content).catch(() => undefined)
   },
 
   upsertFile: (path, content) => {
@@ -145,6 +160,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       files: { ...s.files, [key]: content },
       selectedPath: key,
     }))
+    const root = get().fsaRoot
+    if (root) void fsaWrite(root, key, content).catch(() => undefined)
   },
 
   removeFile: (path) => {
@@ -155,6 +172,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const selectedPath = s.selectedPath === key ? (Object.keys(next)[0] ?? '') : s.selectedPath
       return { files: next, selectedPath }
     })
+    const root = get().fsaRoot
+    if (root) void fsaDelete(root, key).catch(() => undefined)
   },
 
   markRead: (path) => {
@@ -207,15 +226,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   undo: () => {
-    const { undoStack, files } = get()
+    const { undoStack, files, fsaRoot } = get()
     if (undoStack.length === 0) return false
     const entry = undoStack[undoStack.length - 1]
     const nextStack = undoStack.slice(0, -1)
     const nextFiles = { ...files }
     if (entry.before === null) {
       delete nextFiles[entry.path]
+      if (fsaRoot) void fsaDelete(fsaRoot, entry.path).catch(() => undefined)
     } else {
       nextFiles[entry.path] = entry.before
+      if (fsaRoot) void fsaWrite(fsaRoot, entry.path, entry.before).catch(() => undefined)
     }
     set({
       files: nextFiles,
@@ -223,6 +244,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       lastDiff: null,
       selectedPath: entry.path in nextFiles ? entry.path : (Object.keys(nextFiles)[0] ?? ''),
     })
+    const root = get().fsaRoot
+    if (root) {
+      if (entry.before === null) void fsaDelete(root, entry.path).catch(() => undefined)
+      else void fsaWrite(root, entry.path, entry.before).catch(() => undefined)
+    }
     return true
   },
 
@@ -279,10 +305,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       lastDiff: null,
       error: null,
       pendingQuestion: null,
+      fsaRoot: null,
+      fsaName: null,
     })
   },
 
   setHydrated: (value) => set({ hydrated: value }),
+
+  setFsaRoot: (handle, name = null) => set({ fsaRoot: handle, fsaName: name }),
+
+  loadFilesFromMap: (files) => {
+    const paths = Object.keys(files).sort()
+    set({
+      files,
+      selectedPath: paths[0] ?? '',
+      readSet: new Set<string>(),
+      undoStack: [],
+      lastDiff: null,
+    })
+  },
+
+  setMcpServers: (servers) => set({ mcpServers: servers }),
+
+  setMcpToolDefs: (tools) => set({ mcpToolDefs: tools }),
 }))
 
 export function newTodoId(): string {

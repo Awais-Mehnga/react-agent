@@ -2,6 +2,7 @@ import { ChatPanel } from './ui/ChatPanel.tsx'
 import { CodeEditor } from './ui/CodeEditor.tsx'
 import { DiffPanel } from './ui/DiffPanel.tsx'
 import { FileList } from './ui/FileList.tsx'
+import { McpPanel } from './ui/McpPanel.tsx'
 import { QuestionModal } from './ui/QuestionModal.tsx'
 import { TodoList } from './ui/TodoList.tsx'
 
@@ -11,6 +12,7 @@ function App() {
       <div className="flex w-52 shrink-0 flex-col">
         <FileList />
         <TodoList />
+        <McpPanel />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">

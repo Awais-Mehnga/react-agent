@@ -62,8 +62,7 @@ Do **not** port:
 | Phase | Copy from OpenCode | Local status |
 |-------|--------------------|--------------|
 | 2 | Doom-loop from `processor.ts`; `todowrite.txt` + `question.txt` | Done — see Phase 2 map below |
-| 3 | `tool/apply_patch.ts` + `patch/index.ts` + `apply_patch.txt` | Pending |
-| 3 | MCP / plugin registration from `tool/registry.ts` + `packages/plugin` | Pending |
+| 3 | `apply_patch`, web tools, MCP, FSA, `task` | Done — see Phase 3 map below |
 
 ---
 
@@ -81,6 +80,21 @@ Do **not** port:
 
 ---
 
+## Phase 3 source map
+
+| Action | Source / approach | Local path |
+|--------|-------------------|------------|
+| COPY | `tool/apply_patch.txt`, `webfetch.txt`, `websearch.txt`, `task.txt` | `src/agent/vendor/opencode/tools/` |
+| COPY | `agent/prompt/explore.txt` | `src/agent/vendor/opencode/agent/explore.txt` |
+| EXTRACT | `patch/index.ts` (no Effect/FS/Bom) | `src/agent/vendor/opencode/patch.ts` |
+| ADAPT | `apply_patch` + model gating (`gpt-` ∩ ¬oss ∩ ¬gpt-4) | `tools/apply_patch.ts`, `model-tools.ts`, `registry.ts` |
+| ADAPT | `webfetch` / `websearch` via Vite proxies | `tools/webfetch.ts`, `websearch.ts`, `vite.agent-api.ts` |
+| GREENFIELD | FSA open-folder → memory FS + write-through | `fs/fsa-sync.ts`, `ui/FileList.tsx` |
+| GREENFIELD | HTTP/SSE MCP → dynamic `mcp__server__tool` | `mcp/client.ts`, `ui/McpPanel.tsx` |
+| ADAPT | Nested `task` subagent (no recursive `task`) | `tools/task.ts` |
+
+---
+
 ## Adding a new tool
 
 1. Find OpenCode’s `tool/<name>.ts` + `<name>.txt`.
@@ -94,4 +108,4 @@ Do **not** port:
 
 ## LLM boundary
 
-Only the LLM call leaves the browser (via Vite `/api/openai` proxy). All reads, edits, greps, and workspace state stay local.
+LLM calls leave the browser via Vite `/api/openai`. Web tools use `/api/fetch` and `/api/search` proxies (CORS). All workspace reads/edits stay in the VirtualFS (optionally synced via File System Access).
