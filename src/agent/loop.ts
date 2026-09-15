@@ -6,6 +6,19 @@ import { createAgentModel } from './llm'
 import { buildSystemPrompt } from './prompts/system'
 import { createToolSet } from './tools/registry'
 import { useAgentStore, type ChatMessage, type ChatPart } from './session/store'
+import maxStepsNote from './prompts/max-steps.txt?raw'
+
+const DOOM_LOOP_THRESHOLD = 3
+const MAX_STEPS = 20
+
+class DoomLoopError extends Error {
+  constructor(toolName: string) {
+    super(
+      `Doom loop detected: tool "${toolName}" was called ${DOOM_LOOP_THRESHOLD} times in a row with identical arguments. Stopping this turn.`,
+    )
+    this.name = 'DoomLoopError'
+  }
+}
 
 function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   const out: ModelMessage[] = []
@@ -31,6 +44,21 @@ function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
   return out
 }
 
+function recordDoomCall(
+  recent: Array<{ name: string; input: string }>,
+  name: string,
+  input: unknown,
+): void {
+  recent.push({ name, input: JSON.stringify(input ?? {}) })
+  if (recent.length > DOOM_LOOP_THRESHOLD) recent.shift()
+  if (
+    recent.length === DOOM_LOOP_THRESHOLD &&
+    recent.every((c) => c.name === recent[0].name && c.input === recent[0].input)
+  ) {
+    throw new DoomLoopError(name)
+  }
+}
+
 export async function runAgentTurn(userText: string): Promise<void> {
   const store = useAgentStore.getState()
   if (store.isRunning) return
@@ -53,12 +81,21 @@ export async function runAgentTurn(userText: string): Promise<void> {
   store.setRunning(true, controller)
 
   const fs = store.getFS()
-  const tools = createToolSet({
-    fs,
-    wasRead: (p) => useAgentStore.getState().wasRead(p),
-    markRead: (p) => useAgentStore.getState().markRead(p),
-    abort: controller.signal,
-  })
+  const recentCalls: Array<{ name: string; input: string }> = []
+
+  const tools = createToolSet(
+    {
+      fs,
+      wasRead: (p) => useAgentStore.getState().wasRead(p),
+      markRead: (p) => useAgentStore.getState().markRead(p),
+      abort: controller.signal,
+      pushUndo: (path, before) => useAgentStore.getState().pushUndo(path, before),
+      setLastDiff: (diff) => useAgentStore.getState().setLastDiff(diff),
+      setTodos: (todos) => useAgentStore.getState().setTodos(todos),
+      askQuestion: (questions) => useAgentStore.getState().askQuestion(questions),
+    },
+    (name, input) => recordDoomCall(recentCalls, name, input),
+  )
 
   const history = toModelMessages(useAgentStore.getState().messages.filter((m) => m.id !== assistantId))
 
@@ -68,7 +105,7 @@ export async function runAgentTurn(userText: string): Promise<void> {
       system: buildSystemPrompt(fs.list()),
       messages: history,
       tools,
-      stopWhen: isStepCount(20),
+      stopWhen: isStepCount(MAX_STEPS),
       abortSignal: controller.signal,
       onStepFinish: ({ toolCalls, toolResults }) => {
         if (!toolCalls?.length) return
@@ -103,10 +140,20 @@ export async function runAgentTurn(userText: string): Promise<void> {
       })
     }
 
+    const steps = (await result.steps).length
+    if (steps >= MAX_STEPS) {
+      const note = maxStepsNote.trim()
+      useAgentStore.getState().setError('Maximum steps reached')
+      useAgentStore.getState().updateMessage(assistantId, (msg) => ({
+        ...msg,
+        parts: [...msg.parts, { type: 'text', text: `\n\n${note}` }],
+      }))
+    }
+
     await result.response
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    if (controller.signal.aborted) {
+    if (controller.signal.aborted && !(err instanceof DoomLoopError)) {
       useAgentStore.getState().setError('Cancelled')
     } else {
       useAgentStore.getState().setError(message)
@@ -114,6 +161,9 @@ export async function runAgentTurn(userText: string): Promise<void> {
         ...msg,
         parts: [...msg.parts, { type: 'text', text: `\n\nError: ${message}` }],
       }))
+      if (err instanceof DoomLoopError) {
+        controller.abort()
+      }
     }
   } finally {
     useAgentStore.getState().setRunning(false, null)

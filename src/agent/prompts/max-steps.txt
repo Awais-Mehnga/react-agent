@@ -1,0 +1,11 @@
+// Sourced spirit from opencode/packages/core/src/session/runner/max-steps.ts
+// GREENFIELD: browser agent max-steps note (not Effect import).
+
+CRITICAL - MAXIMUM STEPS REACHED
+
+The maximum number of steps allowed for this task has been reached.
+
+Respond with text only summarizing:
+- That maximum steps were reached
+- What was accomplished
+- Remaining work / next recommendations

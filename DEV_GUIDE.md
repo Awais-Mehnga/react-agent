@@ -59,11 +59,25 @@ Do **not** port:
 
 ## Later phases (copy when ready)
 
-| Phase | Copy from OpenCode |
-|-------|--------------------|
-| 2 | Doom-loop ideas from processor; todo/question tool `.txt` + thin adapters |
-| 3 | `tool/apply_patch.ts` + `patch/index.ts` + `apply_patch.txt` (EXTRACT pure parse/apply; ADAPT VirtualFS) |
-| 3 | MCP / plugin registration patterns from `tool/registry.ts` + `packages/plugin` |
+| Phase | Copy from OpenCode | Local status |
+|-------|--------------------|--------------|
+| 2 | Doom-loop from `processor.ts`; `todowrite.txt` + `question.txt` | Done — see Phase 2 map below |
+| 3 | `tool/apply_patch.ts` + `patch/index.ts` + `apply_patch.txt` | Pending |
+| 3 | MCP / plugin registration from `tool/registry.ts` + `packages/plugin` | Pending |
+
+---
+
+## Phase 2 source map
+
+| Action | Source / approach | Local path |
+|--------|-------------------|------------|
+| COPY | `tool/todowrite.txt`, `tool/question.txt` | `src/agent/vendor/opencode/tools/` |
+| ADAPT | Thin todowrite / question tools | `src/agent/tools/todowrite.ts`, `question.ts` |
+| GREENFIELD | Undo + lastDiff | `src/agent/session/store.ts`, `src/ui/DiffPanel.tsx` |
+| GREENFIELD | IndexedDB hydrate/save | `src/agent/session/persist.ts` |
+| INSPIRE | Doom loop (threshold 3) | `src/agent/loop.ts` |
+| GREENFIELD | Max-steps note | `src/agent/prompts/max-steps.txt` |
+| UI | Todos + question modal | `src/ui/TodoList.tsx`, `QuestionModal.tsx` |
 
 ---
 

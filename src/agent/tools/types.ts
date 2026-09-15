@@ -2,12 +2,17 @@
 
 import type { VirtualFS } from '../fs/types'
 import type { ZodType } from 'zod'
+import type { LastDiff, QuestionPrompt, TodoItem } from '../session/store'
 
 export type ToolContext = {
   fs: VirtualFS
   wasRead: (path: string) => boolean
   markRead: (path: string) => void
   abort: AbortSignal
+  pushUndo: (path: string, before: string | null) => void
+  setLastDiff: (diff: LastDiff | null) => void
+  setTodos: (todos: TodoItem[]) => void
+  askQuestion: (questions: QuestionPrompt[]) => Promise<string[][]>
 }
 
 export type ToolResult = {

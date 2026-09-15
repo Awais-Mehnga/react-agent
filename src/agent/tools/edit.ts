@@ -39,7 +39,10 @@ export const editTool: AgentToolDef = {
           'oldString cannot be empty when editing an existing file. Provide the exact text to replace, or use write for an intentional full-file replacement.',
         )
       }
+      ctx.pushUndo(filePath, null)
       ctx.fs.write(filePath, newString)
+      const patch = trimDiff(createTwoFilesPatch(filePath, filePath, '', normalizeLineEndings(newString)))
+      ctx.setLastDiff({ path: filePath, patch })
       return { output: 'File created successfully.', title: filePath }
     }
 
@@ -57,11 +60,14 @@ export const editTool: AgentToolDef = {
     const old = convertToLineEnding(normalizeLineEndings(oldString), ending)
     const replacement = convertToLineEnding(normalizeLineEndings(newString), ending)
     const contentNew = replace(contentOld, old, replacement, replaceAll ?? false)
+
+    ctx.pushUndo(filePath, contentOld)
     ctx.fs.write(filePath, contentNew)
 
     const diff = trimDiff(
       createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
     )
+    ctx.setLastDiff({ path: filePath, patch: diff })
 
     return {
       output: `Edit applied successfully.\n\n${diff}`,
