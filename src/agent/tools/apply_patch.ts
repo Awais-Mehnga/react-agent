@@ -7,6 +7,7 @@ import description from '../vendor/opencode/tools/apply_patch.txt?raw'
 import { deriveNewContentsFromChunks, parsePatch } from '../vendor/opencode/patch'
 import { normalizeLineEndings, trimDiff } from '../vendor/opencode/edit-replace'
 import { normalizePath } from '../fs/paths'
+import { assertAllowedWorkspacePath } from '../../page/allowedFiles'
 
 export const applyPatchTool: AgentToolDef = {
   id: 'apply_patch',
@@ -39,6 +40,10 @@ export const applyPatchTool: AgentToolDef = {
 
     for (const hunk of hunks) {
       const filePath = normalizePath(hunk.path)
+      assertAllowedWorkspacePath(filePath)
+      if (hunk.type === 'update' && hunk.move_path) {
+        assertAllowedWorkspacePath(hunk.move_path)
+      }
 
       if (hunk.type === 'add') {
         if (ctx.fs.exists(filePath)) {

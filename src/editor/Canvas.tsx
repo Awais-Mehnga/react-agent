@@ -1,9 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import themeCss from '../styles/theme.css?raw'
 import editorCss from '../styles/editor.css?raw'
 import { parseHtml, EID_ATTR } from '../html/parser'
 import { serializeHtml } from '../html/serializer'
-import { SelectionOverlay, type Rect } from './SelectionOverlay'
+import { TEXT_EDITABLE_TAGS } from './TextEditor'
 
 export type CanvasSelection = {
   eid: string
@@ -25,14 +24,13 @@ export type CanvasHandle = {
 
 type Props = {
   html: string
+  themeCss: string
   onHtmlChange: (html: string) => void
-  selection: CanvasSelection | null
   onSelect: (sel: CanvasSelection | null) => void
   onRequestMedia: (kind: 'image' | 'video', eid: string) => void
 }
 
-import { TEXT_EDITABLE_TAGS } from './TextEditor'
-function buildSrcDoc(bodyHtml: string): string {
+function buildSrcDoc(bodyHtml: string, themeCss: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -70,10 +68,8 @@ ${bodyHtml}
     e.stopPropagation();
     var el = eidOf(e.target);
     clearHover();
-    document.querySelectorAll('[data-pb-selected]').forEach(function (n) { n.removeAttribute('data-pb-selected'); });
     if (!el) { selected = null; post('select', { eid: null }); return; }
     selected = el;
-    el.setAttribute('data-pb-selected', '');
     post('select', { eid: el.getAttribute('${EID_ATTR}') });
   }, true);
   document.addEventListener('dblclick', function (e) {
@@ -89,8 +85,6 @@ ${bodyHtml}
     if (el && el !== selected) el.setAttribute('data-pb-hover', '');
   }, true);
   document.addEventListener('mouseout', function () { clearHover(); }, true);
-  window.addEventListener('scroll', function () { post('scroll'); }, true);
-  window.addEventListener('resize', function () { post('scroll'); });
   post('ready');
 })();
 <\/script>
@@ -126,19 +120,14 @@ function readSelection(el: Element): CanvasSelection {
   }
 }
 
-function measureInIframe(el: Element): Rect {
-  const r = el.getBoundingClientRect()
-  return { top: r.top, left: r.left, width: r.width, height: r.height }
-}
-
 export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
-  { html, onHtmlChange, selection, onSelect, onRequestMedia },
+  { html, themeCss, onHtmlChange, onSelect, onRequestMedia },
   ref,
 ) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const lastPushedHtml = useRef<string | null>(null)
+  const lastTheme = useRef<string | null>(null)
   const [srcDoc, setSrcDoc] = useState('')
-  const [overlayRect, setOverlayRect] = useState<Rect | null>(null)
   const editingEidRef = useRef<string | null>(null)
 
   const syncFromIframe = useCallback(() => {
@@ -149,27 +138,15 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     onHtmlChange(next)
   }, [onHtmlChange])
 
-  const refreshOverlay = useCallback(() => {
-    const doc = iframeRef.current?.contentDocument
-    if (!doc || !selection?.eid) {
-      setOverlayRect(null)
-      return
-    }
-    const el = doc.querySelector(`[${EID_ATTR}="${CSS.escape(selection.eid)}"]`)
-    if (!el) {
-      setOverlayRect(null)
-      return
-    }
-    setOverlayRect(measureInIframe(el))
-  }, [selection?.eid])
-
   useEffect(() => {
-    if (lastPushedHtml.current !== null && html === lastPushedHtml.current) return
+    const htmlUnchanged = lastPushedHtml.current !== null && html === lastPushedHtml.current
+    const themeUnchanged = lastTheme.current === themeCss
+    if (htmlUnchanged && themeUnchanged) return
     lastPushedHtml.current = html
+    lastTheme.current = themeCss
     const { bodyHtml } = parseHtml(html)
-    setSrcDoc(buildSrcDoc(bodyHtml))
-    setOverlayRect(null)
-  }, [html])
+    setSrcDoc(buildSrcDoc(bodyHtml, themeCss))
+  }, [html, themeCss])
 
   useImperativeHandle(
     ref,
@@ -182,7 +159,6 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
         else el.removeAttribute('class')
         syncFromIframe()
         onSelect(readSelection(el))
-        setOverlayRect(measureInIframe(el))
       },
       applyStubAttr(eid, key, value) {
         const doc = iframeRef.current?.contentDocument
@@ -220,7 +196,6 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
         })
         syncFromIframe()
         onSelect(null)
-        setOverlayRect(null)
       },
     }),
     [onSelect, syncFromIframe],
@@ -233,17 +208,13 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
       const doc = iframeRef.current?.contentDocument
       if (!doc) return
 
-      if (data.type === 'ready' || data.type === 'scroll') {
-        refreshOverlay()
-        return
-      }
+      if (data.type === 'ready') return
 
       if (data.type === 'select') {
         if (editingEidRef.current) return
         const eid = data.eid as string | null
         if (!eid) {
           onSelect(null)
-          setOverlayRect(null)
           return
         }
         const el = doc.querySelector(`[${EID_ATTR}="${CSS.escape(eid)}"]`)
@@ -252,7 +223,6 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
           return
         }
         onSelect(readSelection(el))
-        setOverlayRect(measureInIframe(el))
         return
       }
 
@@ -281,7 +251,6 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
           editingEidRef.current = null
           syncFromIframe()
           onSelect(readSelection(el))
-          setOverlayRect(measureInIframe(el))
         }
         const onKey = (e: KeyboardEvent) => {
           if (e.key === 'Enter' && !e.shiftKey) {
@@ -299,11 +268,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [onSelect, onRequestMedia, refreshOverlay, syncFromIframe])
-
-  useEffect(() => {
-    refreshOverlay()
-  }, [selection, refreshOverlay])
+  }, [onSelect, onRequestMedia, syncFromIframe])
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-zinc-800">
@@ -314,9 +279,6 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
         className="h-full w-full border-0 bg-white"
         sandbox="allow-scripts allow-same-origin"
       />
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <SelectionOverlay rect={overlayRect} label={selection ? selection.tagName : undefined} />
-      </div>
     </div>
   )
 })

@@ -6,6 +6,8 @@ import type { VirtualFS } from '../fs/types'
 import { createMemoryFS } from '../fs/memory-fs'
 import { normalizePath } from '../fs/paths'
 import { fsaDelete, fsaWrite } from '../fs/fsa-sync'
+import themeSeed from '../../styles/theme.css?raw'
+import { assertAllowedWorkspacePath, filterAllowedFiles } from '../../page/allowedFiles'
 
 export type ChatRole = 'user' | 'assistant' | 'system'
 
@@ -62,7 +64,7 @@ export const SEED_FILES: Record<string, string> = {
       Build something beautiful
     </h1>
     <p class="mt-4 max-w-2xl text-lg text-ink-muted">
-      Double-click this text to edit. Double-click the image to replace it. Use AI to regenerate the page.
+      Double-click this text to edit. Double-click the image to replace it. Ask the agent to redesign the page.
     </p>
     <img
       src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=1200&q=80"
@@ -95,22 +97,9 @@ export const SEED_FILES: Record<string, string> = {
   </div>
 </section>
 `,
-  'src/App.tsx': `function App() {
-  return (
-    <div className="flex flex-col items-center justify-center h-screen">
-      <h1 className="text-4xl font-bold">Hello World</h1>
-    </div>
-  )
+  'theme.css': themeSeed,
 }
 
-export default App
-`,
-  'README.md': `# Demo Workspace
-
-Open \`page.html\` for the visual HTML/Tailwind editor.
-Ask the agent to edit \`src/App.tsx\` for code.
-`,
-}
 
 const UNDO_CAP = 50
 
@@ -184,9 +173,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   mcpServers: [],
   mcpToolDefs: {},
 
-  selectFile: (path) => set({ selectedPath: normalizePath(path) }),
+  selectFile: (path) => {
+    assertAllowedWorkspacePath(path)
+    set({ selectedPath: normalizePath(path) })
+  },
 
   setFileContent: (path, content) => {
+    assertAllowedWorkspacePath(path)
     const key = normalizePath(path)
     set((s) => ({ files: { ...s.files, [key]: content } }))
     const root = get().fsaRoot
@@ -194,6 +187,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   upsertFile: (path, content) => {
+    assertAllowedWorkspacePath(path)
     const key = normalizePath(path)
     set((s) => ({
       files: { ...s.files, [key]: content },
@@ -321,11 +315,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   hydrate: (data) => {
+    const allowed = filterAllowedFiles(data.files)
+    const files = { ...SEED_FILES, ...allowed }
+    const selected =
+      data.selectedPath && files[normalizePath(data.selectedPath)]
+        ? normalizePath(data.selectedPath)
+        : 'page.html'
     set({
-      files: data.files,
+      files,
       messages: data.messages,
       todos: data.todos,
-      selectedPath: data.selectedPath || Object.keys(data.files)[0] || '',
+      selectedPath: selected,
       readSet: new Set<string>(),
       undoStack: [],
       lastDiff: null,
@@ -354,10 +354,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setFsaRoot: (handle, name = null) => set({ fsaRoot: handle, fsaName: name }),
 
   loadFilesFromMap: (files) => {
-    const paths = Object.keys(files).sort()
+    const allowed = filterAllowedFiles(files)
+    const merged = Object.keys(allowed).length > 0 ? { ...SEED_FILES, ...allowed } : { ...SEED_FILES }
     set({
-      files,
-      selectedPath: paths[0] ?? '',
+      files: merged,
+      selectedPath: merged['page.html'] ? 'page.html' : Object.keys(merged)[0] ?? '',
       readSet: new Set<string>(),
       undoStack: [],
       lastDiff: null,

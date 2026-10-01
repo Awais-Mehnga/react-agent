@@ -7,6 +7,13 @@ import { buildSystemPrompt } from './prompts/system'
 import { createToolSet } from './tools/registry'
 import { useAgentStore, type ChatMessage, type ChatPart } from './session/store'
 import maxStepsNote from './prompts/max-steps.txt?raw'
+import {
+  extractHtmlFromAssistantText,
+  extractPartialJsonString,
+  stripCodeForChat,
+} from './streamPreview'
+import { sanitizeHtml } from '../html/sanitize'
+import { usePageEditorStore } from '../page/editorStore'
 
 const DOOM_LOOP_THRESHOLD = 3
 const MAX_STEPS = 20
@@ -36,8 +43,10 @@ function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
         .filter((p): p is Extract<ChatPart, { type: 'text' }> => p.type === 'text')
         .map((p) => p.text)
         .join('\n')
-      if (text.trim()) {
-        out.push({ role: 'assistant', content: text })
+      // Persist chat-safe text so history does not re-feed huge HTML dumps
+      const safe = stripCodeForChat(text)
+      if (safe.trim()) {
+        out.push({ role: 'assistant', content: safe })
       }
     }
   }
@@ -57,6 +66,29 @@ function recordDoomCall(
   ) {
     throw new DoomLoopError(name)
   }
+}
+
+function pushPreviewFile(path: string, content: string) {
+  if (path !== 'page.html' && path !== 'theme.css') return
+  const editor = usePageEditorStore.getState()
+  editor.setMode('visual')
+  if (path === 'page.html') {
+    editor.setPreviewHtml(sanitizeHtml(content))
+    useAgentStore.getState().selectFile('page.html')
+  } else {
+    editor.setPreviewTheme(content)
+  }
+}
+
+function toolChatSummary(toolName: string, args: unknown, result?: string): string {
+  const a = (args ?? {}) as Record<string, unknown>
+  const path = typeof a.filePath === 'string' ? a.filePath : ''
+  if (toolName === 'write') return path ? `Wrote ${path}` : 'Wrote file'
+  if (toolName === 'edit') return path ? `Edited ${path}` : 'Edited file'
+  if (toolName === 'read') return path ? `Read ${path}` : 'Read file'
+  if (toolName === 'apply_patch') return 'Applied patch'
+  if (result && result.length < 120 && !result.includes('@@') && !result.includes('<')) return result
+  return toolName
 }
 
 export async function runAgentTurn(userText: string): Promise<void> {
@@ -99,6 +131,11 @@ export async function runAgentTurn(userText: string): Promise<void> {
 
   const history = toModelMessages(useAgentStore.getState().messages.filter((m) => m.id !== assistantId))
 
+  let toolInputBuf = ''
+  let streamingToolName = ''
+  let text = ''
+  let lastPreviewAt = 0
+
   try {
     const result = streamText({
       model: createAgentModel(),
@@ -118,8 +155,8 @@ export async function runAgentTurn(userText: string): Promise<void> {
               type: 'tool',
               toolName: call.toolName,
               status: res ? 'done' : 'error',
-              args: call.input,
-              result: res ? String(res.output ?? '') : undefined,
+              args: { filePath: (call.input as { filePath?: string } | undefined)?.filePath },
+              result: toolChatSummary(call.toolName, call.input, res ? String(res.output ?? '') : undefined),
             })
           }
           return { ...msg, parts }
@@ -127,16 +164,63 @@ export async function runAgentTurn(userText: string): Promise<void> {
       },
     })
 
-    let text = ''
-    for await (const delta of result.textStream) {
-      text += delta
-      const snapshot = text
+    for await (const chunk of result.fullStream) {
+      if (chunk.type === 'text-delta') {
+        text += chunk.text
+        const display = stripCodeForChat(text)
+        useAgentStore.getState().updateMessage(assistantId, (msg) => {
+          const nonText = msg.parts.filter((p) => p.type !== 'text')
+          return {
+            ...msg,
+            parts: display ? [{ type: 'text', text: display }, ...nonText] : nonText,
+          }
+        })
+        // If the model wrongly streams HTML into chat, still update the canvas
+        const leaked = extractHtmlFromAssistantText(text)
+        if (leaked && leaked.length > 40) {
+          const now = Date.now()
+          if (now - lastPreviewAt > 80) {
+            lastPreviewAt = now
+            pushPreviewFile('page.html', leaked)
+          }
+        }
+        continue
+      }
+
+      if (chunk.type === 'tool-input-start') {
+        toolInputBuf = ''
+        streamingToolName = chunk.toolName
+        continue
+      }
+
+      if (chunk.type === 'tool-input-delta') {
+        toolInputBuf += chunk.delta
+        if (streamingToolName === 'write') {
+          const path = extractPartialJsonString(toolInputBuf, 'filePath')
+          const content = extractPartialJsonString(toolInputBuf, 'content')
+          if (path && content && (path === 'page.html' || path === 'theme.css')) {
+            const now = Date.now()
+            if (now - lastPreviewAt > 50) {
+              lastPreviewAt = now
+              pushPreviewFile(path, content)
+            }
+          }
+        }
+        continue
+      }
+
+      if (chunk.type === 'tool-input-end') {
+        toolInputBuf = ''
+        streamingToolName = ''
+      }
+    }
+
+    // Final chat text: code-stripped
+    const finalDisplay = stripCodeForChat(text)
+    if (finalDisplay) {
       useAgentStore.getState().updateMessage(assistantId, (msg) => {
         const nonText = msg.parts.filter((p) => p.type !== 'text')
-        return {
-          ...msg,
-          parts: [{ type: 'text', text: snapshot }, ...nonText],
-        }
+        return { ...msg, parts: [{ type: 'text', text: finalDisplay }, ...nonText] }
       })
     }
 
@@ -166,6 +250,7 @@ export async function runAgentTurn(userText: string): Promise<void> {
       }
     }
   } finally {
+    usePageEditorStore.getState().clearPreview()
     useAgentStore.getState().setRunning(false, null)
   }
 }

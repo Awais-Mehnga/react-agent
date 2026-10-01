@@ -24,14 +24,14 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100">
+    <div className="flex h-full min-h-0 flex-col border-r border-zinc-800 bg-zinc-950 text-zinc-100">
       <div className="border-b border-zinc-800 px-4 py-3 text-sm font-medium tracking-wide text-zinc-300">
         Agent
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
         {messages.length === 0 && (
           <p className="text-zinc-500">
-            Ask the agent to edit workspace files. Example: change the Hello World heading in src/App.tsx.
+            Ask for page or theme changes. The canvas updates live — keep replies in the chat short.
           </p>
         )}
         {messages.map((msg) => (
@@ -40,19 +40,15 @@ export function ChatPanel() {
             <div className="space-y-2 whitespace-pre-wrap break-words">
               {msg.parts.map((part, i) => {
                 if (part.type === 'text') {
+                  if (!part.text.trim()) return null
                   return <div key={i}>{part.text}</div>
                 }
                 return (
                   <div
                     key={i}
-                    className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs text-amber-200"
+                    className="rounded border border-zinc-700/80 bg-zinc-900/80 px-2 py-1 font-mono text-[11px] text-amber-200/90"
                   >
-                    {part.status === 'running' ? '…' : '✓'} {part.toolName}
-                    {part.result ? (
-                      <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-zinc-400">
-                        {part.result.slice(0, 800)}
-                      </pre>
-                    ) : null}
+                    {part.status === 'running' ? '…' : '✓'} {part.result || part.toolName}
                   </div>
                 )
               })}
@@ -66,7 +62,7 @@ export function ChatPanel() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Message the coding agent…"
+          placeholder="Ask the agent to edit page.html or theme.css…"
           className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-zinc-500"
           disabled={isRunning}
         />

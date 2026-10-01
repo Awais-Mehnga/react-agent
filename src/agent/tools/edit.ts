@@ -11,12 +11,13 @@ import {
   replace,
   trimDiff,
 } from '../vendor/opencode/edit-replace'
+import { assertAllowedWorkspacePath } from '../../page/allowedFiles'
 
 export const editTool: AgentToolDef = {
   id: 'edit',
   description: description.trim(),
   parameters: z.object({
-    filePath: z.string().describe('Workspace path to modify'),
+    filePath: z.string().describe('Workspace path to modify (.html or .css only)'),
     oldString: z.string().describe('The text to replace'),
     newString: z.string().describe('The text to replace it with (must differ from oldString)'),
     replaceAll: z.boolean().optional().describe('Replace all occurrences (default false)'),
@@ -28,6 +29,7 @@ export const editTool: AgentToolDef = {
       newString: string
       replaceAll?: boolean
     }
+    assertAllowedWorkspacePath(filePath)
 
     if (oldString === newString) {
       throw new Error('No changes to apply: oldString and newString are identical.')
@@ -70,7 +72,7 @@ export const editTool: AgentToolDef = {
     ctx.setLastDiff({ path: filePath, patch: diff })
 
     return {
-      output: `Edit applied successfully.\n\n${diff}`,
+      output: `Edited ${filePath}. Canvas preview refreshed.`,
       title: filePath,
     }
   },

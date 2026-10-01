@@ -1,27 +1,19 @@
 import { ChatPanel } from './ui/ChatPanel.tsx'
 import { CodeEditor } from './ui/CodeEditor.tsx'
-import { DiffPanel } from './ui/DiffPanel.tsx'
-import { FileList } from './ui/FileList.tsx'
-import { McpPanel } from './ui/McpPanel.tsx'
+import { InspectorPanel } from './ui/InspectorPanel.tsx'
 import { QuestionModal } from './ui/QuestionModal.tsx'
-import { TodoList } from './ui/TodoList.tsx'
 
 function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-zinc-950">
-      <div className="flex w-52 shrink-0 flex-col">
-        <FileList />
-        <TodoList />
-        <McpPanel />
+      <div className="w-[min(360px,32vw)] shrink-0">
+        <ChatPanel />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1">
-          <CodeEditor />
-        </div>
-        <DiffPanel />
+        <CodeEditor />
       </div>
-      <div className="w-[min(420px,40vw)] shrink-0">
-        <ChatPanel />
+      <div className="w-[min(280px,28vw)] shrink-0">
+        <InspectorPanel />
       </div>
       <QuestionModal />
     </div>
