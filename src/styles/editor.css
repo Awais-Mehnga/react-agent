@@ -1,0 +1,17 @@
+/* Editor-only styles injected into the iframe. Never saved with the page. */
+
+[data-eid][data-pb-hover] {
+  outline: 2px dashed rgba(59, 130, 246, 0.45);
+  outline-offset: 2px;
+}
+
+[data-eid][data-pb-selected] {
+  outline: 2px solid rgb(59, 130, 246);
+  outline-offset: 2px;
+}
+
+[data-eid][contenteditable='true'] {
+  outline: 2px solid rgb(34, 197, 94);
+  outline-offset: 2px;
+  cursor: text;
+}

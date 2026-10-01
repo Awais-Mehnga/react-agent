@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { agentApiPlugin } from './vite.agent-api.ts'
+import { compileCssPlugin } from './vite.compile-css.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -13,7 +14,7 @@ export default defineConfig(({ mode }) => {
   const apiKey = env.OPENAI_API_KEY ?? ''
 
   return {
-    plugins: [react(), tailwindcss(), agentApiPlugin()],
+    plugins: [react(), tailwindcss(), agentApiPlugin(), compileCssPlugin(rootDir)],
     server: {
       port: 8002,
       host: true,

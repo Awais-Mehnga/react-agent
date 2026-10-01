@@ -56,6 +56,45 @@ export type PendingQuestion = {
 }
 
 export const SEED_FILES: Record<string, string> = {
+  'page.html': `<section class="py-24 bg-surface">
+  <div class="mx-auto max-w-6xl px-6">
+    <h1 class="text-5xl font-bold text-ink animate-fade-in">
+      Build something beautiful
+    </h1>
+    <p class="mt-4 max-w-2xl text-lg text-ink-muted">
+      Double-click this text to edit. Double-click the image to replace it. Use AI to regenerate the page.
+    </p>
+    <img
+      src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=1200&q=80"
+      alt="Workspace"
+      class="mt-8 w-full rounded-card shadow-lg">
+    <div class="mt-10">
+      <a href="#" class="inline-block rounded-button bg-brand px-6 py-3 font-medium text-white">
+        Get started
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="py-20 bg-surface-muted">
+  <div class="mx-auto max-w-6xl px-6">
+    <h2 class="text-3xl font-bold text-ink">Latest articles</h2>
+    <div
+      data-stub="blog-grid"
+      data-source="posts"
+      data-limit="6"
+      data-category="all"
+      class="mt-10 grid gap-8 md:grid-cols-3">
+      <article data-slot="item" class="rounded-card bg-surface p-6 shadow-sm">
+        <img data-field="image" alt="" class="aspect-video w-full rounded-xl object-cover" src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&q=80">
+        <h3 data-field="title" class="mt-4 text-xl font-semibold text-ink">Sample post</h3>
+        <p data-field="excerpt" class="mt-2 text-ink-muted">A stub card — Laravel fills real posts later.</p>
+        <a data-field="url" href="#" class="mt-4 inline-block text-brand">Read more</a>
+      </article>
+    </div>
+  </div>
+</section>
+`,
   'src/App.tsx': `function App() {
   return (
     <div className="flex flex-col items-center justify-center h-screen">
@@ -68,8 +107,8 @@ export default App
 `,
   'README.md': `# Demo Workspace
 
-This is an in-browser VirtualFS for React Agent Phase 1.
-Ask the agent to edit \`src/App.tsx\`.
+Open \`page.html\` for the visual HTML/Tailwind editor.
+Ask the agent to edit \`src/App.tsx\` for code.
 `,
 }
 
@@ -129,7 +168,7 @@ type AgentState = {
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   files: { ...SEED_FILES },
-  selectedPath: 'src/App.tsx',
+  selectedPath: 'page.html',
   messages: [],
   todos: [],
   isRunning: false,
@@ -297,7 +336,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   resetWorkspace: () => {
     set({
       files: { ...SEED_FILES },
-      selectedPath: 'src/App.tsx',
+      selectedPath: 'page.html',
       messages: [],
       todos: [],
       readSet: new Set<string>(),

@@ -10,11 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "@ai-sdk/openai": "^4.0.66",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tailwindcss/vite": "^4.3.3",
     "ai": "^7.0.101",
     "diff": "^9.0.0",
+    "dompurify": "^3.4.16",
     "lucide-react": "^1.45.0",
     "minimatch": "^10.2.6",
     "nanoid": "^5.1.5",
@@ -25,7 +26,9 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@tailwindcss/node": "^4.3.3",
     "@types/diff": "^7.0.2",
+    "@types/dompurify": "^3.0.5",
     "@types/minimatch": "^5.1.2",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
