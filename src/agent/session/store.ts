@@ -13,6 +13,7 @@ export type ChatRole = 'user' | 'assistant' | 'system'
 
 export type ChatPart =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'tool'; toolName: string; status: 'running' | 'done' | 'error'; args?: unknown; result?: string }
 
 export type ChatMessage = {

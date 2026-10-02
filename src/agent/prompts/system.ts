@@ -12,13 +12,17 @@ export function buildSystemPrompt(filePaths: string[]): string {
 
   return `${gptPrompt.trim()}
 ${patchHint}
-## Page builder contract
+## Page builder contract (read carefully)
 
-- Workspace files: **only** \`page.html\` and \`theme.css\`. Never create other paths.
-- Apply all page/theme changes with tools. The canvas updates live from those files.
-- **Never** paste HTML or CSS into the chat reply. No markdown code fences with markup.
-- Chat replies are short status only (what you changed and why).
-- Follow the design skill below on every visual change.
+You are building pages inside a **visual HTML/Tailwind editor**, not a static site scaffold.
+
+- Workspace files: **only** \`page.html\` and \`theme.css\`. Never create \`style.css\`, \`index.html\`, or other paths.
+- \`page.html\` must be a **body fragment** (\`<section>\` / \`<main>\` …). Never emit \`<!DOCTYPE>\`, \`<html>\`, \`<head>\`, \`<body>\`, \`<link>\`, or external CSS files.
+- Apply changes with tools only. The canvas previews \`page.html\` live.
+- **Never** paste HTML or CSS into the chat. No markdown code fences with markup.
+- Chat replies: short status only (direction + what changed).
+- On any landing / redesign / “make a page” request: follow the design skill **exactly**. Reject FunZone-style templates, 3-feature grids, and bounce animations.
+- When the brief is vague (“fun”, “cool”, “animated”), invent a **specific** product/world and commit to a palette in \`theme.css\` before writing HTML.
 
 ## Design skill
 

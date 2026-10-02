@@ -5,9 +5,13 @@ import { usePageEditorStore } from '../page/editorStore'
 import { isAllowedWorkspacePath } from '../page/allowedFiles'
 import { compilePageCss } from '../html/compileCss'
 import { resetPersistedWorkspace } from '../agent/session/persist'
-import { RotateCcw } from 'lucide-react'
+import { PanelRightClose, RotateCcw } from 'lucide-react'
 
-export function InspectorPanel() {
+type Props = {
+  onCollapse?: () => void
+}
+
+export function InspectorPanel({ onCollapse }: Props) {
   const files = useAgentStore((s) => s.files)
   const selectedPath = useAgentStore((s) => s.selectedPath)
   const selectFile = useAgentStore((s) => s.selectFile)
@@ -51,7 +55,19 @@ export function InspectorPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-3">
-        <div className="text-sm font-medium tracking-wide text-zinc-300">Page</div>
+        <div className="flex items-center gap-1">
+          {onCollapse ? (
+            <button
+              type="button"
+              title="Collapse page panel"
+              onClick={onCollapse}
+              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              <PanelRightClose className="size-4" />
+            </button>
+          ) : null}
+          <div className="text-sm font-medium tracking-wide text-zinc-300">Page</div>
+        </div>
         <button
           type="button"
           title="Reset to seed"

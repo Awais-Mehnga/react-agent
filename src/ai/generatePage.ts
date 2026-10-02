@@ -1,26 +1,21 @@
 import { generateText } from 'ai'
 import { createAgentModel } from '../agent/llm'
-import { sanitizeHtml } from '../html/sanitize'
+import { normalizePageHtml } from '../html/normalizePageHtml'
 import themeCss from '../styles/theme.css?raw'
+import pageDesignSkill from '../agent/skills/page-design.md?raw'
 
-const SYSTEM = `You generate HTML pages for a visual page builder.
+const SYSTEM = `You generate HTML fragments for a visual page builder canvas.
 
-Rules:
-- Output ONLY HTML markup. No markdown fences, no explanations, no JSON.
-- Use Tailwind utility classes for styling.
-- Use semantic HTML (section, header, nav, main, article, footer, h1–h6, p, etc.).
-- Do NOT generate JavaScript, <script> tags, or event handlers.
-- Do NOT use inline style attributes.
-- Do NOT create custom React/Vue components or JSON schemas.
-- Prefer theme tokens when relevant (bg-brand, text-ink, bg-surface, rounded-card, etc.).
-- Use existing media URLs when provided; otherwise use plausible https image URLs.
-- You may use functional stubs as HTML with data-stub attributes:
-  data-stub="blog-grid" | "form" | "collection" | "navigation" | "search" | "pagination"
-  plus the related data-* fields (data-source, data-limit, data-form-id, etc.) and data-slot / data-field for slots.
-- Keep markup clean and production-ready.
+${pageDesignSkill.trim()}
+
+Additional generator rules:
+- Output ONLY a body HTML fragment. No markdown fences, no explanations, no JSON.
+- Never output <!DOCTYPE>, <html>, <head>, <body>, <link>, or style.css references.
+- Use Tailwind utilities + theme tokens from the theme CSS below.
+- No JavaScript, scripts, event handlers, or inline style attributes.
 
 Theme CSS (for reference):
-${themeCss.slice(0, 2000)}
+${themeCss.slice(0, 2500)}
 `
 
 export type GeneratePageOptions = {
@@ -44,7 +39,10 @@ export async function generatePage(options: GeneratePageOptions): Promise<string
       `Instruction: ${options.prompt}`,
     )
   } else {
-    userParts.push(`Generate a full page body HTML for: ${options.prompt}`)
+    userParts.push(
+      `Generate a full page BODY FRAGMENT (sections only) for: ${options.prompt}`,
+      `Remember: no DOCTYPE/html/head/body/link. No FunZone templates. No 3-feature card kits. Update-worthy creative direction.`,
+    )
     if (options.currentHtml?.trim()) {
       userParts.push(`Current page HTML (for reference / iteration):\n${options.currentHtml}`)
     }
@@ -61,5 +59,5 @@ export async function generatePage(options: GeneratePageOptions): Promise<string
     .replace(/\s*```$/i, '')
     .trim()
 
-  return sanitizeHtml(stripped)
+  return normalizePageHtml(stripped)
 }

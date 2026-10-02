@@ -5,16 +5,24 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { agentApiPlugin } from './vite.agent-api.ts'
 import { compileCssPlugin } from './vite.compile-css.ts'
+import { tailwindBrowserPlugin } from './vite.tailwind-browser.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '')
-  const apiKey = env.OPENAI_API_KEY ?? ''
+  const openaiKey = env.OPENAI_API_KEY ?? ''
+  const deepseekKey = env.DEEPSEEK_API_KEY ?? ''
 
   return {
-    plugins: [react(), tailwindcss(), agentApiPlugin(), compileCssPlugin(rootDir)],
+    plugins: [
+      react(),
+      tailwindcss(),
+      agentApiPlugin(),
+      compileCssPlugin(rootDir),
+      tailwindBrowserPlugin(rootDir),
+    ],
     server: {
       port: 8002,
       host: true,
@@ -26,8 +34,21 @@ export default defineConfig(({ mode }) => {
           rewrite: (p) => p.replace(/^\/api\/openai/, '/v1'),
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
-              if (apiKey) {
-                proxyReq.setHeader('Authorization', `Bearer ${apiKey}`)
+              if (openaiKey) {
+                proxyReq.setHeader('Authorization', `Bearer ${openaiKey}`)
+              }
+            })
+          },
+        },
+        // PORT: DeepSeek OpenAI-compatible API — key stays server-side
+        '/api/deepseek': {
+          target: 'https://api.deepseek.com',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/deepseek/, ''),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              if (deepseekKey) {
+                proxyReq.setHeader('Authorization', `Bearer ${deepseekKey}`)
               }
             })
           },

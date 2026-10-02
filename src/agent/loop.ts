@@ -2,7 +2,7 @@
 
 import { isStepCount, streamText, type ModelMessage } from 'ai'
 import { nanoid } from 'nanoid'
-import { createAgentModel } from './llm'
+import { createAgentModel, currentProvider } from './llm'
 import { buildSystemPrompt } from './prompts/system'
 import { createToolSet } from './tools/registry'
 import { useAgentStore, type ChatMessage, type ChatPart } from './session/store'
@@ -12,7 +12,7 @@ import {
   extractPartialJsonString,
   stripCodeForChat,
 } from './streamPreview'
-import { sanitizeHtml } from '../html/sanitize'
+import { normalizePageHtml } from '../html/normalizePageHtml'
 import { usePageEditorStore } from '../page/editorStore'
 
 const DOOM_LOOP_THRESHOLD = 3
@@ -73,7 +73,7 @@ function pushPreviewFile(path: string, content: string) {
   const editor = usePageEditorStore.getState()
   editor.setMode('visual')
   if (path === 'page.html') {
-    editor.setPreviewHtml(sanitizeHtml(content))
+    editor.setPreviewHtml(normalizePageHtml(content))
     useAgentStore.getState().selectFile('page.html')
   } else {
     editor.setPreviewTheme(content)
@@ -134,7 +134,10 @@ export async function runAgentTurn(userText: string): Promise<void> {
   let toolInputBuf = ''
   let streamingToolName = ''
   let text = ''
+  let thinking = ''
   let lastPreviewAt = 0
+
+  const useThinking = currentProvider() === 'deepseek'
 
   try {
     const result = streamText({
@@ -144,6 +147,8 @@ export async function runAgentTurn(userText: string): Promise<void> {
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: controller.signal,
+      // DeepSeek top models expose reasoning — show it in the chat panel
+      ...(useThinking ? { reasoning: 'high' as const } : {}),
       onStepFinish: ({ toolCalls, toolResults }) => {
         if (!toolCalls?.length) return
         useAgentStore.getState().updateMessage(assistantId, (msg) => {
@@ -165,14 +170,32 @@ export async function runAgentTurn(userText: string): Promise<void> {
     })
 
     for await (const chunk of result.fullStream) {
+      if (chunk.type === 'reasoning-delta') {
+        thinking += chunk.text
+        const snapshot = thinking
+        useAgentStore.getState().updateMessage(assistantId, (msg) => {
+          const rest = msg.parts.filter((p) => p.type !== 'thinking')
+          return {
+            ...msg,
+            parts: [{ type: 'thinking', text: snapshot }, ...rest],
+          }
+        })
+        continue
+      }
+
       if (chunk.type === 'text-delta') {
         text += chunk.text
         const display = stripCodeForChat(text)
         useAgentStore.getState().updateMessage(assistantId, (msg) => {
-          const nonText = msg.parts.filter((p) => p.type !== 'text')
+          const thinkingParts = msg.parts.filter((p) => p.type === 'thinking')
+          const toolParts = msg.parts.filter((p) => p.type === 'tool')
           return {
             ...msg,
-            parts: display ? [{ type: 'text', text: display }, ...nonText] : nonText,
+            parts: [
+              ...thinkingParts,
+              ...toolParts,
+              ...(display ? ([{ type: 'text', text: display }] as const) : []),
+            ],
           }
         })
         // If the model wrongly streams HTML into chat, still update the canvas

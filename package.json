@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.66",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@tailwindcss/browser": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "ai": "^7.0.101",
     "diff": "^9.0.0",

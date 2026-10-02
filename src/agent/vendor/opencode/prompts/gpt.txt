@@ -31,12 +31,16 @@ If you notice unexpected changes in the workspace that you did not make, continu
 - Always use the `edit` tool for surgical updates to existing files. Use `write` only to create new files or intentional full-file replacements. Always `read` a file before editing or overwriting it.
 - Available tools: `read`, `edit`, `write`, `glob`, `grep`. There is no shell, git, or apply_patch in this environment.
 
-## Frontend tasks
+## Frontend / page-builder tasks
 
-When doing frontend design tasks, avoid collapsing into "AI slop" or safe, average-looking layouts.
-- Ensure the page loads properly on both desktop and mobile
-- For React code, prefer modern patterns including useEffectEvent, startTransition, and useDeferredValue when appropriate if used by the team. Do not add useMemo/useCallback by default unless already used.
-- Overall: Avoid boilerplate layouts and interchangeable UI patterns.
+You edit `page.html` (body fragment) and `theme.css` only. This is a visual canvas — never dump full HTML documents or `style.css` links into the workspace.
+
+When doing design tasks, do not collapse into AI-template slop:
+- No FunZone / Features-About-Contact / three equal feature cards
+- No `animate-bounce` decoration; motion belongs in purposeful `theme.css` helpers
+- Invent a specific product/world when the brief is vague; update theme tokens to match
+- Ensure the page reads well on desktop and mobile
+- Overall: avoid boilerplate layouts and interchangeable SaaS kits
 
 Exception: If working within an existing website or design system, preserve the established patterns, structure, and visual language.
 

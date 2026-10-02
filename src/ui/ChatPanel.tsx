@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Loader2, Send, Square } from 'lucide-react'
+import { Loader2, PanelLeftClose, Send, Square } from 'lucide-react'
 import { useAgentStore } from '../agent/session/store'
 import { runAgentTurn } from '../agent/loop'
+import { currentModelId, currentProvider } from '../agent/llm'
 
-export function ChatPanel() {
+type Props = {
+  onCollapse?: () => void
+}
+
+export function ChatPanel({ onCollapse }: Props) {
   const messages = useAgentStore((s) => s.messages)
   const isRunning = useAgentStore((s) => s.isRunning)
   const error = useAgentStore((s) => s.error)
   const abort = useAgentStore((s) => s.abort)
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const modelLabel = `${currentProvider()} · ${currentModelId()}`
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -25,8 +31,21 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-zinc-800 bg-zinc-950 text-zinc-100">
-      <div className="border-b border-zinc-800 px-4 py-3 text-sm font-medium tracking-wide text-zinc-300">
-        Agent
+      <div className="flex items-start justify-between gap-2 border-b border-zinc-800 px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium tracking-wide text-zinc-300">Agent</div>
+          <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{modelLabel}</div>
+        </div>
+        {onCollapse ? (
+          <button
+            type="button"
+            title="Collapse agent"
+            onClick={onCollapse}
+            className="shrink-0 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+          >
+            <PanelLeftClose className="size-4" />
+          </button>
+        ) : null}
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-sm">
         {messages.length === 0 && (
@@ -39,6 +58,23 @@ export function ChatPanel() {
             <div className="mb-1 text-[11px] uppercase tracking-wider text-zinc-500">{msg.role}</div>
             <div className="space-y-2 whitespace-pre-wrap break-words">
               {msg.parts.map((part, i) => {
+                if (part.type === 'thinking') {
+                  if (!part.text.trim()) return null
+                  return (
+                    <details
+                      key={i}
+                      open={isRunning && msg.id === messages[messages.length - 1]?.id}
+                      className="rounded-lg border border-violet-900/50 bg-violet-950/30"
+                    >
+                      <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-violet-300">
+                        Thinking
+                      </summary>
+                      <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-violet-900/40 px-2.5 py-2 font-sans text-[11px] leading-relaxed text-violet-200/80">
+                        {part.text}
+                      </pre>
+                    </details>
+                  )
+                }
                 if (part.type === 'text') {
                   if (!part.text.trim()) return null
                   return <div key={i}>{part.text}</div>

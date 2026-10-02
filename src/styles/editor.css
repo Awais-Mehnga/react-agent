@@ -1,7 +1,12 @@
 /* Editor-only styles injected into the iframe. Never saved with the page. */
 
 [data-eid][data-pb-hover] {
-  outline: 1px dashed rgba(59, 130, 246, 0.35);
+  outline: 1px dashed rgba(59, 130, 246, 0.45);
+  outline-offset: 1px;
+}
+
+[data-eid][data-pb-selected] {
+  outline: 1px dashed rgb(59, 130, 246);
   outline-offset: 1px;
 }
 

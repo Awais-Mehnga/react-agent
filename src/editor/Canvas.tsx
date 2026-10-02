@@ -30,28 +30,34 @@ type Props = {
   onRequestMedia: (kind: 'image' | 'video', eid: string) => void
 }
 
-function buildSrcDoc(bodyHtml: string, themeCss: string): string {
+const ROOT_ID = 'pb-root'
+const THEME_STYLE_ID = 'pb-theme'
+
+/** Stable shell: local Tailwind browser runtime (same origin). Page HTML goes into #pb-root. */
+function buildShell(themeCss: string, tailwindScriptUrl: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"><\/script>
-<style type="text/tailwindcss">
+<script src="${tailwindScriptUrl}"><\/script>
+<style type="text/tailwindcss" id="${THEME_STYLE_ID}">
 ${themeCss}
 <\/style>
 <style>
 ${editorCss}
-body { margin: 0; min-height: 100vh; }
+html, body { margin: 0; min-height: 100%; background: #fff; }
+#${ROOT_ID} { min-height: 100vh; }
 <\/style>
 </head>
 <body>
-${bodyHtml}
+<div id="${ROOT_ID}"></div>
 <script>
 (function () {
   var selected = null;
+  var root = document.getElementById('${ROOT_ID}');
   function eidOf(el) {
-    while (el && el !== document.body) {
+    while (el && el !== root && el !== document.body) {
       if (el.getAttribute && el.getAttribute('${EID_ATTR}')) return el;
       el = el.parentElement;
     }
@@ -68,8 +74,10 @@ ${bodyHtml}
     e.stopPropagation();
     var el = eidOf(e.target);
     clearHover();
+    document.querySelectorAll('[data-pb-selected]').forEach(function (n) { n.removeAttribute('data-pb-selected'); });
     if (!el) { selected = null; post('select', { eid: null }); return; }
     selected = el;
+    el.setAttribute('data-pb-selected', '');
     post('select', { eid: el.getAttribute('${EID_ATTR}') });
   }, true);
   document.addEventListener('dblclick', function (e) {
@@ -90,6 +98,13 @@ ${bodyHtml}
 <\/script>
 </body>
 </html>`
+}
+
+function assignEids(root: ParentNode) {
+  let i = 0
+  root.querySelectorAll('*').forEach((el) => {
+    el.setAttribute(EID_ATTR, String(++i))
+  })
 }
 
 function readSelection(el: Element): CanvasSelection {
@@ -120,6 +135,24 @@ function readSelection(el: Element): CanvasSelection {
   }
 }
 
+function getRoot(doc: Document): HTMLElement | null {
+  return doc.getElementById(ROOT_ID)
+}
+
+function writeRootHtml(doc: Document, html: string) {
+  const root = getRoot(doc)
+  if (!root) return
+  const { bodyHtml } = parseHtml(html)
+  root.innerHTML = bodyHtml
+  assignEids(root)
+}
+
+function writeTheme(doc: Document, themeCss: string) {
+  const style = doc.getElementById(THEME_STYLE_ID)
+  if (!style) return
+  style.textContent = themeCss
+}
+
 export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
   { html, themeCss, onHtmlChange, onSelect, onRequestMedia },
   ref,
@@ -127,26 +160,46 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const lastPushedHtml = useRef<string | null>(null)
   const lastTheme = useRef<string | null>(null)
-  const [srcDoc, setSrcDoc] = useState('')
+  const readyRef = useRef(false)
+  const pendingHtml = useRef(html)
+  const pendingTheme = useRef(themeCss)
+  const [srcDoc] = useState(() => {
+    const twUrl = `${window.location.origin}/vendor/tailwind-browser.js`
+    return buildShell(themeCss, twUrl)
+  })
   const editingEidRef = useRef<string | null>(null)
 
   const syncFromIframe = useCallback(() => {
     const doc = iframeRef.current?.contentDocument
-    if (!doc?.body) return
-    const next = serializeHtml(doc)
+    const root = doc ? getRoot(doc) : null
+    if (!root) return
+    const next = serializeHtml(root)
     lastPushedHtml.current = next
     onHtmlChange(next)
   }, [onHtmlChange])
 
+  const applyPending = useCallback(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (!doc || !readyRef.current) return
+
+    if (pendingTheme.current !== lastTheme.current) {
+      writeTheme(doc, pendingTheme.current)
+      lastTheme.current = pendingTheme.current
+    }
+
+    if (pendingHtml.current !== lastPushedHtml.current) {
+      writeRootHtml(doc, pendingHtml.current)
+      lastPushedHtml.current = pendingHtml.current
+      onSelect(null)
+    }
+  }, [onSelect])
+
+  // Keep pending props; patch live DOM without reloading the Tailwind CDN shell
   useEffect(() => {
-    const htmlUnchanged = lastPushedHtml.current !== null && html === lastPushedHtml.current
-    const themeUnchanged = lastTheme.current === themeCss
-    if (htmlUnchanged && themeUnchanged) return
-    lastPushedHtml.current = html
-    lastTheme.current = themeCss
-    const { bodyHtml } = parseHtml(html)
-    setSrcDoc(buildSrcDoc(bodyHtml, themeCss))
-  }, [html, themeCss])
+    pendingHtml.current = html
+    pendingTheme.current = themeCss
+    applyPending()
+  }, [html, themeCss, applyPending])
 
   useImperativeHandle(
     ref,
@@ -184,16 +237,14 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
       replaceElementOuterHtml(eid, outerHtml) {
         const doc = iframeRef.current?.contentDocument
         const el = doc?.querySelector(`[${EID_ATTR}="${CSS.escape(eid)}"]`)
-        if (!el || !doc) return
+        const root = doc ? getRoot(doc) : null
+        if (!el || !doc || !root) return
         const wrap = doc.createElement('div')
         wrap.innerHTML = outerHtml
         const next = wrap.firstElementChild
         if (!next) return
         el.replaceWith(next)
-        let i = 0
-        doc.body.querySelectorAll('*').forEach((node) => {
-          node.setAttribute(EID_ATTR, String(++i))
-        })
+        assignEids(root)
         syncFromIframe()
         onSelect(null)
       },
@@ -208,7 +259,11 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
       const doc = iframeRef.current?.contentDocument
       if (!doc) return
 
-      if (data.type === 'ready') return
+      if (data.type === 'ready') {
+        readyRef.current = true
+        applyPending()
+        return
+      }
 
       if (data.type === 'select') {
         if (editingEidRef.current) return
@@ -268,7 +323,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [onSelect, onRequestMedia, syncFromIframe])
+  }, [onSelect, onRequestMedia, syncFromIframe, applyPending])
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-zinc-800">

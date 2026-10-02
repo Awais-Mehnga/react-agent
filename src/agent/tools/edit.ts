@@ -12,6 +12,7 @@ import {
   trimDiff,
 } from '../vendor/opencode/edit-replace'
 import { assertAllowedWorkspacePath } from '../../page/allowedFiles'
+import { normalizePageHtml } from '../../html/normalizePageHtml'
 
 export const editTool: AgentToolDef = {
   id: 'edit',
@@ -23,7 +24,13 @@ export const editTool: AgentToolDef = {
     replaceAll: z.boolean().optional().describe('Replace all occurrences (default false)'),
   }),
   execute: async (args, ctx) => {
-    const { filePath, oldString, newString, replaceAll } = args as {
+    const { filePath, oldString, replaceAll } = args as {
+      filePath: string
+      oldString: string
+      newString: string
+      replaceAll?: boolean
+    }
+    let { newString } = args as {
       filePath: string
       oldString: string
       newString: string
@@ -41,6 +48,7 @@ export const editTool: AgentToolDef = {
           'oldString cannot be empty when editing an existing file. Provide the exact text to replace, or use write for an intentional full-file replacement.',
         )
       }
+      if (/\.html?$/i.test(filePath)) newString = normalizePageHtml(newString)
       ctx.pushUndo(filePath, null)
       ctx.fs.write(filePath, newString)
       const patch = trimDiff(createTwoFilesPatch(filePath, filePath, '', normalizeLineEndings(newString)))
@@ -61,7 +69,10 @@ export const editTool: AgentToolDef = {
     const ending = detectLineEnding(contentOld)
     const old = convertToLineEnding(normalizeLineEndings(oldString), ending)
     const replacement = convertToLineEnding(normalizeLineEndings(newString), ending)
-    const contentNew = replace(contentOld, old, replacement, replaceAll ?? false)
+    let contentNew = replace(contentOld, old, replacement, replaceAll ?? false)
+    if (/\.html?$/i.test(filePath) && /<!DOCTYPE|<html[\s>]/i.test(contentNew)) {
+      contentNew = normalizePageHtml(contentNew)
+    }
 
     ctx.pushUndo(filePath, contentOld)
     ctx.fs.write(filePath, contentNew)
