@@ -17,6 +17,7 @@ type PageEditorState = {
   /** Live agent stream overlay — does not write the workspace until tools commit. */
   previewHtml: string | null
   previewTheme: string | null
+  isEditing: boolean
   selection: CanvasSelection | null
   canvas: CanvasHandle | null
   saving: boolean
@@ -26,6 +27,7 @@ type PageEditorState = {
   setViewport: (viewport: ViewportId) => void
   setPreviewHtml: (html: string | null) => void
   setPreviewTheme: (css: string | null) => void
+  setIsEditing: (isEditing: boolean) => void
   clearPreview: () => void
   setSelection: (sel: CanvasSelection | null) => void
   setCanvas: (api: CanvasHandle | null) => void
@@ -41,6 +43,7 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   viewport: 'desktop',
   previewHtml: null,
   previewTheme: null,
+  isEditing: false,
   selection: null,
   canvas: null,
   saving: false,
@@ -48,9 +51,10 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
   error: null,
   setMode: (mode) => set({ mode, selection: mode === 'code' ? null : get().selection }),
   setViewport: (viewport) => set({ viewport }),
-  setPreviewHtml: (previewHtml) => set({ previewHtml }),
-  setPreviewTheme: (previewTheme) => set({ previewTheme }),
-  clearPreview: () => set({ previewHtml: null, previewTheme: null }),
+  setPreviewHtml: (previewHtml) => set({ previewHtml, isEditing: previewHtml !== null }),
+  setPreviewTheme: (previewTheme) => set({ previewTheme, isEditing: previewTheme !== null }),
+  setIsEditing: (isEditing) => set({ isEditing }),
+  clearPreview: () => set({ previewHtml: null, previewTheme: null, isEditing: false }),
   setSelection: (selection) => set({ selection }),
   setCanvas: (canvas) => set({ canvas }),
   setSaving: (saving) => set({ saving }),

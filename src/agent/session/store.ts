@@ -192,7 +192,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const key = normalizePath(path)
     set((s) => ({
       files: { ...s.files, [key]: content },
-      selectedPath: key,
+      selectedPath: s.selectedPath ? s.selectedPath : key,
     }))
     const root = get().fsaRoot
     if (root) void fsaWrite(root, key, content).catch(() => undefined)

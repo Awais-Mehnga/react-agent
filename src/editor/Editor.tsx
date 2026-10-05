@@ -13,6 +13,7 @@ export function Editor({ html, themeCss, onChange }: Props) {
   const canvasRef = useRef<CanvasHandle>(null)
   const setSelection = usePageEditorStore((s) => s.setSelection)
   const setCanvas = usePageEditorStore((s) => s.setCanvas)
+  const isEditing = usePageEditorStore((s) => s.isEditing)
   const [media, setMedia] = useState<{ kind: 'image' | 'video'; eid: string } | null>(null)
 
   useLayoutEffect(() => {
@@ -33,6 +34,7 @@ export function Editor({ html, themeCss, onChange }: Props) {
         ref={canvasRef}
         html={html}
         themeCss={themeCss}
+        isEditing={isEditing}
         onHtmlChange={onHtmlChange}
         onSelect={setSelection}
         onRequestMedia={(kind, eid) => setMedia({ kind, eid })}

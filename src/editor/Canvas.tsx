@@ -25,6 +25,7 @@ export type CanvasHandle = {
 type Props = {
   html: string
   themeCss: string
+  isEditing?: boolean
   onHtmlChange: (html: string) => void
   onSelect: (sel: CanvasSelection | null) => void
   onRequestMedia: (kind: 'image' | 'video', eid: string) => void
@@ -40,15 +41,22 @@ function buildShell(themeCss: string, tailwindScriptUrl: string): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<script src="${tailwindScriptUrl}"><\/script>
 <style type="text/tailwindcss" id="${THEME_STYLE_ID}">
 ${themeCss}
-<\/style>
+</style>
+<script src="${tailwindScriptUrl}"></script>
 <style>
 ${editorCss}
+body[data-pb-editing="true"] *,
+body[data-pb-editing="true"] *::before,
+body[data-pb-editing="true"] *::after {
+  animation-duration: 0.001s !important;
+  animation-play-state: paused !important;
+  transition: none !important;
+}
 html, body { margin: 0; min-height: 100%; background: #fff; }
 #${ROOT_ID} { min-height: 100vh; }
-<\/style>
+</style>
 </head>
 <body>
 <div id="${ROOT_ID}"></div>
@@ -95,7 +103,7 @@ html, body { margin: 0; min-height: 100%; background: #fff; }
   document.addEventListener('mouseout', function () { clearHover(); }, true);
   post('ready');
 })();
-<\/script>
+</script>
 </body>
 </html>`
 }
@@ -139,22 +147,37 @@ function getRoot(doc: Document): HTMLElement | null {
   return doc.getElementById(ROOT_ID)
 }
 
+function refreshTailwind(doc: Document, themeCss?: string) {
+  const head = doc.head || doc.getElementsByTagName('head')[0]
+  if (!head) return
+  const oldStyle = doc.getElementById(THEME_STYLE_ID)
+  const css = themeCss ?? oldStyle?.textContent ?? ''
+  const newStyle = doc.createElement('style')
+  newStyle.type = 'text/tailwindcss'
+  newStyle.id = THEME_STYLE_ID
+  newStyle.textContent = css
+  if (oldStyle && oldStyle.parentNode) {
+    oldStyle.parentNode.replaceChild(newStyle, oldStyle)
+  } else {
+    head.appendChild(newStyle)
+  }
+}
+
 function writeRootHtml(doc: Document, html: string) {
   const root = getRoot(doc)
   if (!root) return
   const { bodyHtml } = parseHtml(html)
   root.innerHTML = bodyHtml
   assignEids(root)
+  refreshTailwind(doc)
 }
 
 function writeTheme(doc: Document, themeCss: string) {
-  const style = doc.getElementById(THEME_STYLE_ID)
-  if (!style) return
-  style.textContent = themeCss
+  refreshTailwind(doc, themeCss)
 }
 
 export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
-  { html, themeCss, onHtmlChange, onSelect, onRequestMedia },
+  { html, themeCss, isEditing, onHtmlChange, onSelect, onRequestMedia },
   ref,
 ) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -182,15 +205,22 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     const doc = iframeRef.current?.contentDocument
     if (!doc || !readyRef.current) return
 
+    let changed = false
     if (pendingTheme.current !== lastTheme.current) {
       writeTheme(doc, pendingTheme.current)
       lastTheme.current = pendingTheme.current
+      changed = true
     }
 
     if (pendingHtml.current !== lastPushedHtml.current) {
       writeRootHtml(doc, pendingHtml.current)
       lastPushedHtml.current = pendingHtml.current
       onSelect(null)
+      changed = true
+    }
+
+    if (changed) {
+      refreshTailwind(doc, pendingTheme.current)
     }
   }, [onSelect])
 
@@ -201,15 +231,27 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     applyPending()
   }, [html, themeCss, applyPending])
 
+  // Suppress animations while editing; resume cleanly once editing completes
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (!doc?.body) return
+    if (isEditing) {
+      doc.body.setAttribute('data-pb-editing', 'true')
+    } else {
+      doc.body.removeAttribute('data-pb-editing')
+    }
+  }, [isEditing])
+
   useImperativeHandle(
     ref,
     () => ({
       applyClass(eid, className) {
         const doc = iframeRef.current?.contentDocument
         const el = doc?.querySelector(`[${EID_ATTR}="${CSS.escape(eid)}"]`)
-        if (!el) return
+        if (!el || !doc) return
         if (className.trim()) el.setAttribute('class', className.trim())
         else el.removeAttribute('class')
+        refreshTailwind(doc)
         syncFromIframe()
         onSelect(readSelection(el))
       },
@@ -245,6 +287,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
         if (!next) return
         el.replaceWith(next)
         assignEids(root)
+        refreshTailwind(doc)
         syncFromIframe()
         onSelect(null)
       },

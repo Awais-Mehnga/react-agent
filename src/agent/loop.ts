@@ -72,9 +72,9 @@ function pushPreviewFile(path: string, content: string) {
   if (path !== 'page.html' && path !== 'theme.css') return
   const editor = usePageEditorStore.getState()
   editor.setMode('visual')
+  editor.setIsEditing(true)
   if (path === 'page.html') {
     editor.setPreviewHtml(normalizePageHtml(content))
-    useAgentStore.getState().selectFile('page.html')
   } else {
     editor.setPreviewTheme(content)
   }
@@ -111,6 +111,7 @@ export async function runAgentTurn(userText: string): Promise<void> {
   store.addMessage(userMsg)
   store.addMessage(assistantMsg)
   store.setRunning(true, controller)
+  usePageEditorStore.getState().setIsEditing(true)
 
   const fs = store.getFS()
   const recentCalls: Array<{ name: string; input: string }> = []
@@ -141,14 +142,14 @@ export async function runAgentTurn(userText: string): Promise<void> {
 
   try {
     const result = streamText({
-      model: createAgentModel(),
+      model: createAgentModel('code'),
       system: buildSystemPrompt(fs.list()),
       messages: history,
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: controller.signal,
-      // DeepSeek top models expose reasoning — show it in the chat panel
-      ...(useThinking ? { reasoning: 'high' as const } : {}),
+      // DeepSeek top model code generation with low reasoning to control token cost
+      ...(useThinking ? { reasoning: 'low' as const } : {}),
       onStepFinish: ({ toolCalls, toolResults }) => {
         if (!toolCalls?.length) return
         useAgentStore.getState().updateMessage(assistantId, (msg) => {
@@ -274,6 +275,7 @@ export async function runAgentTurn(userText: string): Promise<void> {
     }
   } finally {
     usePageEditorStore.getState().clearPreview()
+    usePageEditorStore.getState().setIsEditing(false)
     useAgentStore.getState().setRunning(false, null)
   }
 }

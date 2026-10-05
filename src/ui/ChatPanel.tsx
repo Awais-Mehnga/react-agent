@@ -60,16 +60,27 @@ export function ChatPanel({ onCollapse }: Props) {
               {msg.parts.map((part, i) => {
                 if (part.type === 'thinking') {
                   if (!part.text.trim()) return null
+                  const isCurrentRunning = isRunning && msg.id === messages[messages.length - 1]?.id
                   return (
                     <details
                       key={i}
-                      open={isRunning && msg.id === messages[messages.length - 1]?.id}
-                      className="rounded-lg border border-violet-900/50 bg-violet-950/30"
+                      open={isCurrentRunning}
+                      className="group rounded-lg border border-violet-800/40 bg-violet-950/25 text-xs shadow-sm transition-all"
                     >
-                      <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-violet-300">
-                        Thinking
+                      <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-1.5 font-medium tracking-wide text-violet-300 hover:text-violet-200">
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className={`size-1.5 rounded-full ${
+                              isCurrentRunning ? 'bg-violet-400 animate-pulse' : 'bg-violet-500/60'
+                            }`}
+                          />
+                          DeepSeek Thinking
+                        </span>
+                        <span className="text-[10px] text-violet-400/60 transition-transform group-open:rotate-180">
+                          ▼
+                        </span>
                       </summary>
-                      <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-violet-900/40 px-2.5 py-2 font-sans text-[11px] leading-relaxed text-violet-200/80">
+                      <pre className="max-h-60 overflow-auto whitespace-pre-wrap border-t border-violet-900/30 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-violet-200/90 selection:bg-violet-800">
                         {part.text}
                       </pre>
                     </details>
