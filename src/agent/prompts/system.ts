@@ -3,15 +3,29 @@
 import gptPrompt from '../vendor/opencode/prompts/gpt.txt?raw'
 import pageDesignSkill from '../skills/page-design.md?raw'
 import { currentModelId, useApplyPatchOnly } from '../tools/model-tools'
+import type { CanvasSelection } from '../../editor/Canvas'
 
-export function buildSystemPrompt(filePaths: string[]): string {
+export function buildSystemPrompt(filePaths: string[], selectedElement?: CanvasSelection | null): string {
   const listing = filePaths.length === 0 ? '(empty workspace)' : filePaths.map((p) => `- ${p}`).join('\n')
   const patchHint = useApplyPatchOnly(currentModelId())
     ? '\n- For file edits use `apply_patch` (not edit/write).\n'
-    : '\n- For file edits prefer `edit` after `read`; use `write` only for intentional full-file replacement of `page.html` or `theme.css`.\n'
+    : '\n- CRITICAL FILE EDITING RULE: Always `read` first, then use `edit` to make surgical, targeted text replacements. NEVER rewrite an entire file from scratch using `write` when updating existing code. Use `write` only when creating an entirely new file for the first time.\n'
+
+  const selectionBlock = selectedElement
+    ? `\n## Active visual element selection
+The user has currently selected this specific element in the visual canvas:
+<selected_element>
+Tag: <${selectedElement.tagName}>
+Classes: "${selectedElement.className}"
+HTML:
+${selectedElement.outerHtml.slice(0, 800)}
+${selectedElement.stubId ? `Stub: ${selectedElement.stubId}\n` : ''}</selected_element>
+IMPORTANT: When the user's prompt says "this", "it", "the selected element", "the button", "the headline", or requests to edit/style/modify an element, they are referring to this selected element. Use \`read\` and surgical \`edit\` to target this element in \`page.html\` or its classes directly.\n`
+    : ''
 
   return `${gptPrompt.trim()}
 ${patchHint}
+${selectionBlock}
 ## Page builder contract (read carefully)
 
 You are building pages inside a **visual HTML/Tailwind editor**, not a static site scaffold.
@@ -33,3 +47,4 @@ ${pageDesignSkill.trim()}
 ${listing}
 `
 }
+

@@ -1,6 +1,4 @@
-// GREENFIELD: IndexedDB persistence for workspace + chat + todos
-
-import { useAgentStore, type ChatMessage, type TodoItem } from './store'
+import { useAgentStore, type ChatMessage, type SessionItem, type TodoItem } from './store'
 
 const DB_NAME = 'react-agent'
 const STORE_NAME = 'session'
@@ -8,6 +6,8 @@ const KEY = 'react-agent-v1'
 
 export type PersistedSession = {
   files: Record<string, string>
+  sessions?: SessionItem[]
+  currentSessionId?: string
   messages: ChatMessage[]
   todos: TodoItem[]
   selectedPath: string
@@ -64,6 +64,8 @@ export async function hydrateFromIdb(): Promise<void> {
     if (data?.files && Object.keys(data.files).length > 0) {
       useAgentStore.getState().hydrate({
         files: data.files,
+        sessions: data.sessions,
+        currentSessionId: data.currentSessionId,
         messages: data.messages ?? [],
         todos: data.todos ?? [],
         selectedPath: data.selectedPath,
@@ -85,6 +87,8 @@ export function bindPersistSubscription(): () => void {
     timer = setTimeout(() => {
       void saveSession({
         files: state.files,
+        sessions: state.sessions,
+        currentSessionId: state.currentSessionId,
         messages: state.messages,
         todos: state.todos,
         selectedPath: state.selectedPath,
@@ -100,10 +104,11 @@ export function bindPersistSubscription(): () => void {
 
 export async function resetPersistedWorkspace(): Promise<void> {
   useAgentStore.getState().resetWorkspace()
-  await clearSession()
   await saveSession({
     files: useAgentStore.getState().files,
-    messages: [],
+    sessions: useAgentStore.getState().sessions,
+    currentSessionId: useAgentStore.getState().currentSessionId,
+    messages: useAgentStore.getState().messages,
     todos: [],
     selectedPath: useAgentStore.getState().selectedPath,
   })

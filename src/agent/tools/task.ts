@@ -30,7 +30,7 @@ export const taskTool: AgentToolDef = {
         : `You are a general coding subagent. Complete the task and return one final summary message.\n\n${buildSystemPrompt(ctx.fs.list())}`
 
     const result = streamText({
-      model: createAgentModel(),
+      model: createAgentModel(subagent_type === 'explore' ? 'explore' : 'code'),
       system,
       prompt,
       tools,

@@ -3,6 +3,8 @@ import { Canvas, type CanvasHandle } from './Canvas'
 import { MediaSelector } from './MediaSelector'
 import { usePageEditorStore } from '../page/editorStore'
 
+import { useAgentStore } from '../agent/session/store'
+
 type Props = {
   html: string
   themeCss: string
@@ -14,7 +16,10 @@ export function Editor({ html, themeCss, onChange }: Props) {
   const setSelection = usePageEditorStore((s) => s.setSelection)
   const setCanvas = usePageEditorStore((s) => s.setCanvas)
   const isEditing = usePageEditorStore((s) => s.isEditing)
+  const isRunning = useAgentStore((s) => s.isRunning)
   const [media, setMedia] = useState<{ kind: 'image' | 'video'; eid: string } | null>(null)
+
+  const freezeAnimations = isEditing || isRunning
 
   useLayoutEffect(() => {
     setCanvas(canvasRef.current)
@@ -34,7 +39,7 @@ export function Editor({ html, themeCss, onChange }: Props) {
         ref={canvasRef}
         html={html}
         themeCss={themeCss}
-        isEditing={isEditing}
+        isEditing={freezeAnimations}
         onHtmlChange={onHtmlChange}
         onSelect={setSelection}
         onRequestMedia={(kind, eid) => setMedia({ kind, eid })}

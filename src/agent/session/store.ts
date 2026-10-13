@@ -15,12 +15,22 @@ export type ChatPart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool'; toolName: string; status: 'running' | 'done' | 'error'; args?: unknown; result?: string }
+  | { type: 'compaction'; summary: string }
 
 export type ChatMessage = {
   id: string
   role: ChatRole
   parts: ChatPart[]
 }
+
+export type SessionItem = {
+  id: string
+  title: string
+  messages: ChatMessage[]
+  createdAt: number
+  updatedAt: number
+}
+
 
 export type TodoItem = {
   id: string
@@ -107,6 +117,8 @@ const UNDO_CAP = 50
 type AgentState = {
   files: Record<string, string>
   selectedPath: string
+  sessions: SessionItem[]
+  currentSessionId: string
   messages: ChatMessage[]
   todos: TodoItem[]
   isRunning: boolean
@@ -130,6 +142,11 @@ type AgentState = {
   wasRead: (path: string) => boolean
   addMessage: (message: ChatMessage) => void
   updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void
+  createSession: (title?: string) => string
+  switchSession: (id: string) => void
+  deleteSession: (id: string) => void
+  updateSessionTitle: (id: string, title: string) => void
+  compactCurrentSession: (summary: string) => void
   setRunning: (running: boolean, controller?: AbortController | null) => void
   setError: (error: string | null) => void
   abort: () => void
@@ -144,6 +161,8 @@ type AgentState = {
   cancelQuestion: () => void
   hydrate: (data: {
     files: Record<string, string>
+    sessions?: SessionItem[]
+    currentSessionId?: string
     messages: ChatMessage[]
     todos: TodoItem[]
     selectedPath: string
@@ -156,9 +175,21 @@ type AgentState = {
   setMcpToolDefs: (tools: import('ai').ToolSet) => void
 }
 
+const defaultSessionId = nanoid()
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   files: { ...SEED_FILES },
   selectedPath: 'page.html',
+  sessions: [
+    {
+      id: defaultSessionId,
+      title: 'New Chat',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+  ],
+  currentSessionId: defaultSessionId,
   messages: [],
   todos: [],
   isRunning: false,
@@ -221,12 +252,130 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   wasRead: (path) => get().readSet.has(normalizePath(path)),
 
-  addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
+  addMessage: (message) =>
+    set((s) => {
+      const messages = [...s.messages, message]
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.currentSessionId
+          ? { ...sess, messages, updatedAt: Date.now() }
+          : sess,
+      )
+      return { messages, sessions }
+    }),
 
   updateMessage: (id, updater) =>
+    set((s) => {
+      const messages = s.messages.map((m) => (m.id === id ? updater(m) : m))
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.currentSessionId
+          ? { ...sess, messages, updatedAt: Date.now() }
+          : sess,
+      )
+      return { messages, sessions }
+    }),
+
+  createSession: (title = 'New Chat') => {
+    const id = nanoid()
+    const newSession: SessionItem = {
+      id,
+      title,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    set((s) => {
+      // Sync active session before switching
+      const sessions = s.sessions.map((sess) =>
+        sess.id === s.currentSessionId ? { ...sess, messages: s.messages } : sess,
+      )
+      return {
+        sessions: [newSession, ...sessions],
+        currentSessionId: id,
+        messages: [],
+        error: null,
+      }
+    })
+    return id
+  },
+
+  switchSession: (id) => {
+    const { sessions, currentSessionId, messages } = get()
+    if (id === currentSessionId) return
+    const syncedSessions = sessions.map((sess) =>
+      sess.id === currentSessionId ? { ...sess, messages } : sess,
+    )
+    const target = syncedSessions.find((sess) => sess.id === id)
+    if (!target) return
+    set({
+      sessions: syncedSessions,
+      currentSessionId: id,
+      messages: target.messages,
+      error: null,
+    })
+  },
+
+  deleteSession: (id) => {
+    const { sessions, currentSessionId } = get()
+    const remaining = sessions.filter((s) => s.id !== id)
+    if (remaining.length === 0) {
+      const freshId = nanoid()
+      const fresh: SessionItem = {
+        id: freshId,
+        title: 'New Chat',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      set({
+        sessions: [fresh],
+        currentSessionId: freshId,
+        messages: [],
+        error: null,
+      })
+      return
+    }
+
+    if (currentSessionId === id) {
+      const nextSession = remaining[0]
+      set({
+        sessions: remaining,
+        currentSessionId: nextSession.id,
+        messages: nextSession.messages,
+        error: null,
+      })
+    } else {
+      set({ sessions: remaining })
+    }
+  },
+
+  updateSessionTitle: (id, title) => {
     set((s) => ({
-      messages: s.messages.map((m) => (m.id === id ? updater(m) : m)),
-    })),
+      sessions: s.sessions.map((sess) =>
+        sess.id === id ? { ...sess, title, updatedAt: Date.now() } : sess,
+      ),
+    }))
+  },
+
+  compactCurrentSession: (summary) => {
+    const { currentSessionId, messages } = get()
+    const keepCount = Math.min(2, messages.length)
+    const recent = messages.slice(messages.length - keepCount)
+    const compactionMsg: ChatMessage = {
+      id: nanoid(),
+      role: 'assistant',
+      parts: [{ type: 'compaction', summary }],
+    }
+    const compactedMessages = [compactionMsg, ...recent]
+    set((s) => ({
+      messages: compactedMessages,
+      sessions: s.sessions.map((sess) =>
+        sess.id === currentSessionId
+          ? { ...sess, messages: compactedMessages, updatedAt: Date.now() }
+          : sess,
+      ),
+    }))
+  },
+
 
   setRunning: (running, controller = null) =>
     set({
@@ -322,9 +471,34 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       data.selectedPath && files[normalizePath(data.selectedPath)]
         ? normalizePath(data.selectedPath)
         : 'page.html'
+
+    let sessions = data.sessions ?? []
+    let currentSessionId = data.currentSessionId ?? ''
+    let messages = data.messages ?? []
+
+    if (sessions.length === 0) {
+      const defaultId = nanoid()
+      sessions = [
+        {
+          id: defaultId,
+          title: messages.length > 0 ? 'Chat 1' : 'New Chat',
+          messages: messages,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ]
+      currentSessionId = defaultId
+    } else {
+      const active = sessions.find((s) => s.id === currentSessionId) ?? sessions[0]
+      currentSessionId = active.id
+      messages = active.messages
+    }
+
     set({
       files,
-      messages: data.messages,
+      sessions,
+      currentSessionId,
+      messages,
       todos: data.todos,
       selectedPath: selected,
       readSet: new Set<string>(),
@@ -338,7 +512,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({
       files: { ...SEED_FILES },
       selectedPath: 'page.html',
-      messages: [],
       todos: [],
       readSet: new Set<string>(),
       undoStack: [],

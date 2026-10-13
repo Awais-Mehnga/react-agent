@@ -47,13 +47,17 @@ ${themeCss}
 <script src="${tailwindScriptUrl}"></script>
 <style>
 ${editorCss}
+html[data-pb-editing="true"] *,
+html[data-pb-editing="true"] *::before,
+html[data-pb-editing="true"] *::after,
 body[data-pb-editing="true"] *,
 body[data-pb-editing="true"] *::before,
 body[data-pb-editing="true"] *::after {
-  animation-duration: 0.001s !important;
   animation-play-state: paused !important;
   transition: none !important;
 }
+
+
 html, body { margin: 0; min-height: 100%; background: #fff; }
 #${ROOT_ID} { min-height: 100vh; }
 </style>
@@ -166,9 +170,16 @@ function refreshTailwind(doc: Document, themeCss?: string) {
 function writeRootHtml(doc: Document, html: string) {
   const root = getRoot(doc)
   if (!root) return
+  // Allow empty HTML to clear the canvas — do not guard on length here.
+  // Partial-stream fragments are blocked upstream in pushPreviewFile.
   const { bodyHtml } = parseHtml(html)
-  root.innerHTML = bodyHtml
+  root.innerHTML = bodyHtml ?? ''
   assignEids(root)
+  // Replace the Tailwind style node to force a full rebuild.
+  // The hl MutationObserver watches childList on head; replacing the node
+  // triggers Et("full") which re-scans ALL classes (unlike the incremental
+  // build that DOM class-attribute mutations trigger). Clean CSS is passed
+  // so no revert is needed.
   refreshTailwind(doc)
 }
 
@@ -205,24 +216,18 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     const doc = iframeRef.current?.contentDocument
     if (!doc || !readyRef.current) return
 
-    let changed = false
     if (pendingTheme.current !== lastTheme.current) {
       writeTheme(doc, pendingTheme.current)
       lastTheme.current = pendingTheme.current
-      changed = true
     }
 
     if (pendingHtml.current !== lastPushedHtml.current) {
       writeRootHtml(doc, pendingHtml.current)
       lastPushedHtml.current = pendingHtml.current
       onSelect(null)
-      changed = true
-    }
-
-    if (changed) {
-      refreshTailwind(doc, pendingTheme.current)
     }
   }, [onSelect])
+
 
   // Keep pending props; patch live DOM without reloading the Tailwind CDN shell
   useEffect(() => {
@@ -237,8 +242,15 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     if (!doc?.body) return
     if (isEditing) {
       doc.body.setAttribute('data-pb-editing', 'true')
+      doc.documentElement?.setAttribute('data-pb-editing', 'true')
+      doc.querySelectorAll('video, audio').forEach((el) => {
+        try {
+          ;(el as HTMLMediaElement).pause()
+        } catch {}
+      })
     } else {
       doc.body.removeAttribute('data-pb-editing')
+      doc.documentElement?.removeAttribute('data-pb-editing')
     }
   }, [isEditing])
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { Editor } from '../editor/Editor'
 import { ViewportBar } from '../editor/ViewportBar'
 import { useAgentStore } from '../agent/session/store'
@@ -42,11 +42,6 @@ export function CodeEditor() {
   const viewport = usePageEditorStore((s) => s.viewport)
   const previewHtml = usePageEditorStore((s) => s.previewHtml)
   const previewTheme = usePageEditorStore((s) => s.previewTheme)
-  const [localMode, setLocalMode] = useState(mode)
-
-  useEffect(() => {
-    setLocalMode(mode)
-  }, [mode])
 
   const openFullPreview = useCallback(() => {
     const html = previewHtml ?? content
@@ -70,13 +65,31 @@ export function CodeEditor() {
   }
 
   const showToggle = isHtmlPath(selectedPath)
-  const effectiveMode = showToggle ? localMode : 'code'
+  const effectiveMode = showToggle ? mode : 'code'
   const frameWidth = VIEWPORTS[viewport].width
+
+  const activeContent =
+    selectedPath === 'page.html' && previewHtml !== null
+      ? previewHtml
+      : selectedPath === 'theme.css' && previewTheme !== null
+        ? previewTheme
+        : content
+
+  const isStreamingPreview =
+    (selectedPath === 'page.html' && previewHtml !== null) ||
+    (selectedPath === 'theme.css' && previewTheme !== null)
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-zinc-900 text-zinc-100">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2">
-        <div className="font-mono text-xs text-zinc-400">{selectedPath}</div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-zinc-400">{selectedPath}</span>
+          {isStreamingPreview && (
+            <span className="inline-flex items-center gap-1 rounded bg-sky-950/80 px-1.5 py-0.5 font-mono text-[10px] text-sky-400 border border-sky-800/50 animate-pulse">
+              updating live…
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {showToggle && effectiveMode === 'visual' ? <ViewportBar /> : null}
           {showToggle ? (
@@ -84,10 +97,7 @@ export function CodeEditor() {
               <div className="flex rounded-lg border border-zinc-700 p-0.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => {
-                    setLocalMode('visual')
-                    setMode('visual')
-                  }}
+                  onClick={() => setMode('visual')}
                   className={`rounded-md px-3 py-1 ${
                     effectiveMode === 'visual' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
                   }`}
@@ -96,10 +106,7 @@ export function CodeEditor() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setLocalMode('code')
-                    setMode('code')
-                  }}
+                  onClick={() => setMode('code')}
                   className={`rounded-md px-3 py-1 ${
                     effectiveMode === 'code' ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
                   }`}
@@ -142,7 +149,8 @@ export function CodeEditor() {
           </div>
         ) : (
           <textarea
-            value={content}
+            value={activeContent}
+            readOnly={isStreamingPreview}
             onChange={(e) => setFileContent(selectedPath, e.target.value)}
             spellCheck={false}
             className="h-full w-full resize-none bg-transparent p-4 font-mono text-xs leading-5 text-zinc-200 outline-none"

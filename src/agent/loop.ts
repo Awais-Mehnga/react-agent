@@ -2,7 +2,7 @@
 
 import { isStepCount, streamText, type ModelMessage } from 'ai'
 import { nanoid } from 'nanoid'
-import { createAgentModel, currentProvider } from './llm'
+import { createAgentModel, currentModelId, currentProvider } from './llm'
 import { buildSystemPrompt } from './prompts/system'
 import { createToolSet } from './tools/registry'
 import { useAgentStore, type ChatMessage, type ChatPart } from './session/store'
@@ -14,6 +14,8 @@ import {
 } from './streamPreview'
 import { normalizePageHtml } from '../html/normalizePageHtml'
 import { usePageEditorStore } from '../page/editorStore'
+import { compactConversation } from './session/compaction'
+import { generateSessionTitle } from './prompts/title'
 
 const DOOM_LOOP_THRESHOLD = 3
 const MAX_STEPS = 20
@@ -27,18 +29,45 @@ class DoomLoopError extends Error {
   }
 }
 
-function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
+import type { CanvasSelection } from '../editor/Canvas'
+
+function toModelMessages(
+  messages: ChatMessage[],
+  selectedElement?: CanvasSelection | null,
+): ModelMessage[] {
   const out: ModelMessage[] = []
-  for (const msg of messages) {
+  const lastUserIndex = messages.map((m) => m.role).lastIndexOf('user')
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!
     if (msg.role === 'user') {
-      const text = msg.parts
+      let text = msg.parts
         .filter((p): p is Extract<ChatPart, { type: 'text' }> => p.type === 'text')
         .map((p) => p.text)
         .join('\n')
+
+      if (i === lastUserIndex && selectedElement) {
+        text += `\n\n[Context: User has selected <${selectedElement.tagName} class="${selectedElement.className}"> in the visual editor:\n${selectedElement.outerHtml.slice(0, 800)}]`
+      }
+
       out.push({ role: 'user', content: text })
       continue
     }
     if (msg.role === 'assistant') {
+      const compaction = msg.parts.find(
+        (p): p is Extract<ChatPart, { type: 'compaction' }> => p.type === 'compaction',
+      )
+      if (compaction) {
+        out.push({
+          role: 'user',
+          content: `[CONTEXT SUMMARY — previous messages have been compacted]:\n${compaction.summary}`,
+        })
+        out.push({
+          role: 'assistant',
+          content: 'Understood. I have the context summary and will continue from there.',
+        })
+      }
+
       const text = msg.parts
         .filter((p): p is Extract<ChatPart, { type: 'text' }> => p.type === 'text')
         .map((p) => p.text)
@@ -71,14 +100,16 @@ function recordDoomCall(
 function pushPreviewFile(path: string, content: string) {
   if (path !== 'page.html' && path !== 'theme.css') return
   const editor = usePageEditorStore.getState()
-  editor.setMode('visual')
   editor.setIsEditing(true)
   if (path === 'page.html') {
-    editor.setPreviewHtml(normalizePageHtml(content))
+    if (content.trim().length > 30) {
+      editor.setPreviewHtml(normalizePageHtml(content))
+    }
   } else {
     editor.setPreviewTheme(content)
   }
 }
+
 
 function toolChatSummary(toolName: string, args: unknown, result?: string): string {
   const a = (args ?? {}) as Record<string, unknown>
@@ -96,6 +127,19 @@ export async function runAgentTurn(userText: string): Promise<void> {
   if (store.isRunning) return
 
   const controller = new AbortController()
+
+  // Pre-turn compaction check if conversation has grown very long
+  if (store.messages.length >= 10) {
+    try {
+      const summary = await compactConversation(store.messages, {
+        abortSignal: controller.signal,
+      })
+      useAgentStore.getState().compactCurrentSession(summary)
+    } catch (e) {
+      console.warn('Pre-turn compaction check:', e)
+    }
+  }
+
   const userMsg: ChatMessage = {
     id: nanoid(),
     role: 'user',
@@ -112,6 +156,22 @@ export async function runAgentTurn(userText: string): Promise<void> {
   store.addMessage(assistantMsg)
   store.setRunning(true, controller)
   usePageEditorStore.getState().setIsEditing(true)
+
+  // Asynchronously generate title for new chats
+  const activeSession = useAgentStore
+    .getState()
+    .sessions.find((s) => s.id === store.currentSessionId)
+  if (
+    activeSession &&
+    (!activeSession.title || activeSession.title === 'New Chat') &&
+    store.messages.length <= 2
+  ) {
+    void generateSessionTitle(userText).then((title) => {
+      if (title) {
+        useAgentStore.getState().updateSessionTitle(store.currentSessionId, title)
+      }
+    })
+  }
 
   const fs = store.getFS()
   const recentCalls: Array<{ name: string; input: string }> = []
@@ -130,7 +190,11 @@ export async function runAgentTurn(userText: string): Promise<void> {
     (name, input) => recordDoomCall(recentCalls, name, input),
   )
 
-  const history = toModelMessages(useAgentStore.getState().messages.filter((m) => m.id !== assistantId))
+  const selection = usePageEditorStore.getState().selection
+  const history = toModelMessages(
+    useAgentStore.getState().messages.filter((m) => m.id !== assistantId),
+    selection,
+  )
 
   let toolInputBuf = ''
   let streamingToolName = ''
@@ -138,20 +202,34 @@ export async function runAgentTurn(userText: string): Promise<void> {
   let thinking = ''
   let lastPreviewAt = 0
 
-  const useThinking = currentProvider() === 'deepseek'
+  const modelId = currentModelId('code').toLowerCase()
+  const isReasoningModel =
+    currentProvider() === 'deepseek' &&
+    (modelId.includes('reasoner') || modelId.includes('r1') || modelId.includes('pro'))
 
   try {
     const result = streamText({
       model: createAgentModel('code'),
-      system: buildSystemPrompt(fs.list()),
+      system: buildSystemPrompt(fs.list(), selection),
       messages: history,
       tools,
       stopWhen: isStepCount(MAX_STEPS),
       abortSignal: controller.signal,
-      // DeepSeek top model code generation with low reasoning to control token cost
-      ...(useThinking ? { reasoning: 'low' as const } : {}),
+      // Pass low reasoning only when explicitly using a reasoning model
+      ...(isReasoningModel ? { reasoning: 'low' as const } : {}),
       onStepFinish: ({ toolCalls, toolResults }) => {
         if (!toolCalls?.length) return
+        for (let i = 0; i < toolCalls.length; i++) {
+          const call = toolCalls[i]
+          if (call.toolName === 'write' || call.toolName === 'edit') {
+            const p = (call.input as { filePath?: string } | undefined)?.filePath
+            if (p === 'page.html' || p === 'theme.css') {
+              if (fs.exists(p)) {
+                pushPreviewFile(p, fs.read(p))
+              }
+            }
+          }
+        }
         useAgentStore.getState().updateMessage(assistantId, (msg) => {
           const parts = [...msg.parts]
           for (let i = 0; i < toolCalls.length; i++) {
@@ -190,11 +268,15 @@ export async function runAgentTurn(userText: string): Promise<void> {
         useAgentStore.getState().updateMessage(assistantId, (msg) => {
           const thinkingParts = msg.parts.filter((p) => p.type === 'thinking')
           const toolParts = msg.parts.filter((p) => p.type === 'tool')
+          const otherParts = msg.parts.filter(
+            (p) => p.type !== 'text' && p.type !== 'thinking' && p.type !== 'tool',
+          )
           return {
             ...msg,
             parts: [
               ...thinkingParts,
               ...toolParts,
+              ...otherParts,
               ...(display ? ([{ type: 'text', text: display }] as const) : []),
             ],
           }
@@ -223,10 +305,27 @@ export async function runAgentTurn(userText: string): Promise<void> {
           const path = extractPartialJsonString(toolInputBuf, 'filePath')
           const content = extractPartialJsonString(toolInputBuf, 'content')
           if (path && content && (path === 'page.html' || path === 'theme.css')) {
-            const now = Date.now()
-            if (now - lastPreviewAt > 50) {
-              lastPreviewAt = now
-              pushPreviewFile(path, content)
+            if (content.length > 60 && (content.includes('</') || content.includes('}'))) {
+              const now = Date.now()
+              if (now - lastPreviewAt > 100) {
+                lastPreviewAt = now
+                pushPreviewFile(path, content)
+              }
+            }
+          }
+        } else if (streamingToolName === 'edit') {
+          const path = extractPartialJsonString(toolInputBuf, 'filePath')
+          const oldStr = extractPartialJsonString(toolInputBuf, 'oldString')
+          const newStr = extractPartialJsonString(toolInputBuf, 'newString')
+          if (path && oldStr && newStr && (path === 'page.html' || path === 'theme.css')) {
+            const currentFile = fs.exists(path) ? fs.read(path) : ''
+            if (currentFile && currentFile.includes(oldStr)) {
+              const live = currentFile.replace(oldStr, newStr)
+              const now = Date.now()
+              if (now - lastPreviewAt > 40) {
+                lastPreviewAt = now
+                pushPreviewFile(path, live)
+              }
             }
           }
         }
@@ -239,23 +338,53 @@ export async function runAgentTurn(userText: string): Promise<void> {
       }
     }
 
-    // Final chat text: code-stripped
+    // Final chat text: code-stripped, preserving strict order (thinking -> tools -> text)
     const finalDisplay = stripCodeForChat(text)
     if (finalDisplay) {
       useAgentStore.getState().updateMessage(assistantId, (msg) => {
-        const nonText = msg.parts.filter((p) => p.type !== 'text')
-        return { ...msg, parts: [{ type: 'text', text: finalDisplay }, ...nonText] }
+        const thinkingParts = msg.parts.filter((p) => p.type === 'thinking')
+        const toolParts = msg.parts.filter((p) => p.type === 'tool')
+        const otherParts = msg.parts.filter(
+          (p) => p.type !== 'text' && p.type !== 'thinking' && p.type !== 'tool',
+        )
+        return {
+          ...msg,
+          parts: [
+            ...thinkingParts,
+            ...toolParts,
+            ...otherParts,
+            { type: 'text', text: finalDisplay },
+          ],
+        }
       })
     }
 
     const steps = (await result.steps).length
     if (steps >= MAX_STEPS) {
-      const note = maxStepsNote.trim()
-      useAgentStore.getState().setError('Maximum steps reached')
-      useAgentStore.getState().updateMessage(assistantId, (msg) => ({
-        ...msg,
-        parts: [...msg.parts, { type: 'text', text: `\n\n${note}` }],
-      }))
+      // Automatic session compaction instead of breaking
+      try {
+        const currentMsgs = useAgentStore.getState().messages
+        const summary = await compactConversation(currentMsgs, {
+          abortSignal: controller.signal,
+        })
+        useAgentStore.getState().compactCurrentSession(summary)
+        useAgentStore.getState().updateMessage(assistantId, (msg) => ({
+          ...msg,
+          parts: [
+            ...msg.parts,
+            {
+              type: 'text',
+              text: '\n\n*Session context compacted to continue smoothly in this chat.*',
+            },
+          ],
+        }))
+      } catch {
+        const note = maxStepsNote.trim()
+        useAgentStore.getState().updateMessage(assistantId, (msg) => ({
+          ...msg,
+          parts: [...msg.parts, { type: 'text', text: `\n\n${note}` }],
+        }))
+      }
     }
 
     await result.response

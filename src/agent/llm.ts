@@ -4,20 +4,41 @@
 import { createOpenAI } from '@ai-sdk/openai'
 
 export type LlmProvider = 'deepseek' | 'openai'
-export type ModelPurpose = 'code' | 'reading'
+export type ModelPurpose = 'code' | 'reading' | 'small' | 'title' | 'compaction' | 'explore'
 
 export function currentProvider(): LlmProvider {
   const raw = (import.meta.env.VITE_LLM_PROVIDER || 'deepseek').toLowerCase()
   return raw === 'openai' ? 'openai' : 'deepseek'
 }
 
-export function currentModelId(purpose: ModelPurpose = 'code'): string {
+/** OpenCode-style small model resolver for auxiliary tasks (titles, summaries, compaction, exploration) */
+export function getSmallModelId(): string {
   const provider = currentProvider()
   if (provider === 'deepseek') {
-    if (purpose === 'reading') {
-      return import.meta.env.VITE_DEEPSEEK_READING_MODEL || 'deepseek-chat'
-    }
-    return import.meta.env.VITE_DEEPSEEK_MODEL || 'deepseek-reasoner'
+    return (
+      import.meta.env.VITE_DEEPSEEK_SMALL_MODEL ||
+      import.meta.env.VITE_DEEPSEEK_READING_MODEL ||
+      'deepseek-chat'
+    )
+  }
+  return import.meta.env.VITE_OPENAI_SMALL_MODEL || 'gpt-4o-mini'
+}
+
+export function currentModelId(purpose: ModelPurpose = 'code'): string {
+  const provider = currentProvider()
+  const isAuxiliary =
+    purpose === 'reading' ||
+    purpose === 'small' ||
+    purpose === 'title' ||
+    purpose === 'compaction' ||
+    purpose === 'explore'
+
+  if (isAuxiliary) {
+    return getSmallModelId()
+  }
+
+  if (provider === 'deepseek') {
+    return import.meta.env.VITE_DEEPSEEK_MODEL || 'deepseek-chat'
   }
   return import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o-mini'
 }
