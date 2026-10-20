@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import editorCss from '../styles/editor.css?raw'
 import { parseHtml, EID_ATTR } from '../html/parser'
+import { morphHtml } from '../html/morphDom'
 import { serializeHtml } from '../html/serializer'
 import { TEXT_EDITABLE_TAGS } from './TextEditor'
 
@@ -10,14 +11,22 @@ export type CanvasSelection = {
   className: string
   stubId: string | null
   stubAttrs: Record<string, string>
+  attrs: {
+    src?: string
+    alt?: string
+    href?: string
+    target?: string
+  }
   outerHtml: string
   isText: boolean
   isMedia: 'image' | 'video' | null
+  isAnchor: boolean
 }
 
 export type CanvasHandle = {
   applyClass: (eid: string, className: string) => void
   applyStubAttr: (eid: string, key: string, value: string) => void
+  applyAttr: (eid: string, name: string, value: string) => void
   replaceMediaSrc: (eid: string, url: string) => void
   replaceElementOuterHtml: (eid: string, outerHtml: string) => void
 }
@@ -36,13 +45,18 @@ const THEME_STYLE_ID = 'pb-theme'
 
 /** Stable shell: local Tailwind browser runtime (same origin). Page HTML goes into #pb-root. */
 function buildShell(themeCss: string, tailwindScriptUrl: string): string {
+  const { css, fontUrls } = extractFontImports(themeCss)
+  const fontLinks = fontUrls
+    .map((href) => `<link rel="stylesheet" href="${href}" ${FONT_LINK_ATTR} />`)
+    .join('\n')
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+${fontLinks}
 <style type="text/tailwindcss" id="${THEME_STYLE_ID}">
-${themeCss}
+${css}
 </style>
 <script src="${tailwindScriptUrl}"></script>
 <style>
@@ -132,6 +146,16 @@ function readSelection(el: Element): CanvasSelection {
   if (tag === 'IMG') isMedia = 'image'
   if (tag === 'VIDEO') isMedia = 'video'
 
+  const attrs: CanvasSelection['attrs'] = {}
+  const src = el.getAttribute('src')
+  const alt = el.getAttribute('alt')
+  const href = el.getAttribute('href')
+  const target = el.getAttribute('target')
+  if (src != null) attrs.src = src
+  if (alt != null) attrs.alt = alt
+  if (href != null) attrs.href = href
+  if (target != null) attrs.target = target
+
   return {
     eid: el.getAttribute(EID_ATTR) || '',
     tagName: tag.toLowerCase(),
@@ -141,9 +165,11 @@ function readSelection(el: Element): CanvasSelection {
       .join(' '),
     stubId: stubRoot?.getAttribute('data-stub') ?? null,
     stubAttrs,
+    attrs,
     outerHtml: el.outerHTML,
     isText: TEXT_EDITABLE_TAGS.has(tag),
     isMedia,
+    isAnchor: tag === 'A',
   }
 }
 
@@ -151,11 +177,49 @@ function getRoot(doc: Document): HTMLElement | null {
   return doc.getElementById(ROOT_ID)
 }
 
+const FONT_LINK_ATTR = 'data-pb-font'
+
+/**
+ * `@import` inside `type="text/tailwindcss"` breaks the Tailwind browser runtime
+ * (tokens / utilities never apply → unstyled HTML). Load fonts via <link> instead.
+ */
+function extractFontImports(themeCss: string): { css: string; fontUrls: string[] } {
+  const fontUrls: string[] = []
+  const css = themeCss.replace(
+    /@import\s+url\(["']?([^"')]+)["']?\)\s*;?/gi,
+    (_full, href: string) => {
+      fontUrls.push(href)
+      return ''
+    },
+  )
+  return { css: css.trim(), fontUrls }
+}
+
+function syncFontLinks(doc: Document, fontUrls: string[]) {
+  const head = doc.head || doc.getElementsByTagName('head')[0]
+  if (!head) return
+  head.querySelectorAll(`link[${FONT_LINK_ATTR}]`).forEach((n) => n.remove())
+  for (const href of fontUrls) {
+    const link = doc.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = href
+    link.setAttribute(FONT_LINK_ATTR, '')
+    head.insertBefore(link, head.firstChild)
+  }
+}
+
 function refreshTailwind(doc: Document, themeCss?: string) {
   const head = doc.head || doc.getElementsByTagName('head')[0]
   if (!head) return
   const oldStyle = doc.getElementById(THEME_STYLE_ID)
-  const css = themeCss ?? oldStyle?.textContent ?? ''
+  // Only re-extract fonts when a full theme payload is provided — otherwise
+  // oldStyle already has @import stripped and we'd wipe the <link> tags.
+  let css = oldStyle?.textContent ?? ''
+  if (themeCss != null) {
+    const extracted = extractFontImports(themeCss)
+    css = extracted.css
+    syncFontLinks(doc, extracted.fontUrls)
+  }
   const newStyle = doc.createElement('style')
   newStyle.type = 'text/tailwindcss'
   newStyle.id = THEME_STYLE_ID
@@ -167,20 +231,33 @@ function refreshTailwind(doc: Document, themeCss?: string) {
   }
 }
 
-function writeRootHtml(doc: Document, html: string) {
+let lastStreamTwRefresh = 0
+
+function writeRootHtml(doc: Document, html: string, streaming = false) {
   const root = getRoot(doc)
   if (!root) return
-  // Allow empty HTML to clear the canvas — do not guard on length here.
-  // Partial-stream fragments are blocked upstream in pushPreviewFile.
-  const { bodyHtml } = parseHtml(html)
-  root.innerHTML = bodyHtml ?? ''
+  // Streaming previews skip DOMPurify — partial tags would otherwise vanish.
+  const { bodyHtml } = parseHtml(html, { sanitize: !streaming })
+  const next = bodyHtml ?? ''
+
+  // Morph in place when the canvas already has content — only touched nodes update.
+  // Full replace only on empty root (first paint) to avoid wholesale reflows/flicker.
+  if (root.childNodes.length > 0 && next.trim().length > 0) {
+    morphHtml(root, next, doc)
+  } else {
+    root.innerHTML = next
+  }
   assignEids(root)
-  // Replace the Tailwind style node to force a full rebuild.
-  // The hl MutationObserver watches childList on head; replacing the node
-  // triggers Et("full") which re-scans ALL classes (unlike the incremental
-  // build that DOM class-attribute mutations trigger). Clean CSS is passed
-  // so no revert is needed.
-  refreshTailwind(doc)
+  if (!streaming) {
+    refreshTailwind(doc)
+    return
+  }
+  // Stream: rebuild Tailwind on a short throttle so new utility classes paint live
+  const now = Date.now()
+  if (!doc.getElementById(THEME_STYLE_ID) || now - lastStreamTwRefresh > 180) {
+    lastStreamTwRefresh = now
+    refreshTailwind(doc)
+  }
 }
 
 function writeTheme(doc: Document, themeCss: string) {
@@ -212,6 +289,9 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     onHtmlChange(next)
   }, [onHtmlChange])
 
+  const streamingRef = useRef(Boolean(isEditing))
+  streamingRef.current = Boolean(isEditing)
+
   const applyPending = useCallback(() => {
     const doc = iframeRef.current?.contentDocument
     if (!doc || !readyRef.current) return
@@ -222,12 +302,19 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
     }
 
     if (pendingHtml.current !== lastPushedHtml.current) {
-      writeRootHtml(doc, pendingHtml.current)
+      const prevEid =
+        doc.querySelector('[data-pb-selected]')?.getAttribute(EID_ATTR) ?? null
+      writeRootHtml(doc, pendingHtml.current, streamingRef.current)
       lastPushedHtml.current = pendingHtml.current
-      onSelect(null)
+      if (prevEid) {
+        const el = doc.querySelector(`[${EID_ATTR}="${CSS.escape(prevEid)}"]`)
+        if (el) {
+          el.setAttribute('data-pb-selected', '')
+          onSelect(readSelection(el))
+        }
+      }
     }
   }, [onSelect])
-
 
   // Keep pending props; patch live DOM without reloading the Tailwind CDN shell
   useEffect(() => {
@@ -276,6 +363,16 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(
         else root.setAttribute(key, value)
         syncFromIframe()
         onSelect(readSelection(root))
+      },
+      applyAttr(eid, name, value) {
+        const doc = iframeRef.current?.contentDocument
+        const el = doc?.querySelector(`[${EID_ATTR}="${CSS.escape(eid)}"]`)
+        if (!el || !doc) return
+        if (value === '') el.removeAttribute(name)
+        else el.setAttribute(name, value)
+        if (name === 'src' || name === 'href') refreshTailwind(doc)
+        syncFromIframe()
+        onSelect(readSelection(el))
       },
       replaceMediaSrc(eid, url) {
         const doc = iframeRef.current?.contentDocument

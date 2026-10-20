@@ -1,29 +1,31 @@
 /* Theme tokens + helper classes shipped with every saved page.
    Preview and Laravel both serve this file as-is (not compiled). */
 
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&display=swap");
+
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "DM Sans", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
 
-  --color-brand-50: #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
-  --color-brand-900: #1e3a8a;
-  --color-brand: #2563eb;
+  --color-brand-50: #f0fdf6;
+  --color-brand-100: #dcfce9;
+  --color-brand-200: #bbf7d4;
+  --color-brand-300: #86efb0;
+  --color-brand-400: #4ade80;
+  --color-brand-500: #22c55e;
+  --color-brand-600: #16a34a;
+  --color-brand-700: #15803d;
+  --color-brand-800: #166534;
+  --color-brand-900: #14532d;
+  --color-brand: #15803d;
 
-  --color-surface: #ffffff;
-  --color-surface-muted: #f4f4f5;
-  --color-ink: #18181b;
-  --color-ink-muted: #71717a;
+  --color-surface: #fafaf7;
+  --color-surface-muted: #f0efe8;
+  --color-ink: #14211a;
+  --color-ink-muted: #5c6b62;
 
-  --radius-card: 1rem;
-  --radius-button: 0.75rem;
+  --radius-card: 0.75rem;
+  --radius-button: 9999px;
 }
 
 /* Helper classes the AI may use */
@@ -32,7 +34,7 @@
 }
 
 .animate-slide-up {
-  animation: slide-up 0.6s ease-out both;
+  animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes fade-in {
@@ -47,7 +49,7 @@
 @keyframes slide-up {
   from {
     opacity: 0;
-    transform: translateY(1rem);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;

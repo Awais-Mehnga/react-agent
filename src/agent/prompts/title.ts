@@ -16,7 +16,7 @@ Your output must be:
 </task>
 
 <rules>
-- You MUST use the same language as the user message you are summarizing
+- Use English for the title unless the user message is clearly written in another language (then match that language). Never default to Chinese.
 - Title must be grammatically correct and read naturally
 - Never include tool names in the title (e.g. "read tool", "bash tool", "edit tool")
 - Focus on the main topic or question the user needs to retrieve

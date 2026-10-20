@@ -1,7 +1,7 @@
 // GREENFIELD: register Phase 1–3 tools and convert to AI SDK tools
 
 import { tool, type ToolSet } from 'ai'
-import type { AgentToolDef, ToolContext } from './types'
+import type { AgentToolDef, ToolContext, ToolResult } from './types'
 import { readTool } from './read'
 import { editTool } from './edit'
 import { writeTool } from './write'
@@ -31,11 +31,13 @@ const allBuiltins: AgentToolDef[] = [
 ]
 
 export type DoomGuard = (toolName: string, input: unknown) => void
+export type ToolResultHook = (toolName: string, input: unknown, result: ToolResult) => void
 
 export type CreateToolSetOptions = {
   exclude?: string[]
   includeMcp?: boolean
   modelId?: string
+  onToolResult?: ToolResultHook
 }
 
 export function createToolSet(
@@ -63,9 +65,17 @@ export function createToolSet(
       description: def.description,
       inputSchema: def.parameters,
       execute: async (input) => {
-        doomGuard?.(def.id, input)
-        const result = await def.execute(input, ctx)
-        return result.output
+        try {
+          doomGuard?.(def.id, input)
+          const result = await def.execute(input, ctx)
+          options.onToolResult?.(def.id, input, result)
+          return result.output
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          console.error(`[tool:${def.id}]`, message, err)
+          // Return error to the model so it can recover instead of opaque tool failures
+          return `Error: ${message}`
+        }
       },
     })
   }

@@ -35,8 +35,7 @@ export const applyPatchTool: AgentToolDef = {
     }
 
     const summaries: string[] = []
-    let lastPatch = ''
-    let lastPath = ''
+    const fileDiffs: Array<{ filepath: string; diff: string }> = []
 
     for (const hunk of hunks) {
       const filePath = normalizePath(hunk.path)
@@ -51,12 +50,11 @@ export const applyPatchTool: AgentToolDef = {
         }
         const newContent =
           hunk.contents.length === 0 || hunk.contents.endsWith('\n') ? hunk.contents : `${hunk.contents}\n`
-        ctx.pushUndo(filePath, null)
+        const diff = trimDiff(createTwoFilesPatch(filePath, filePath, '', normalizeLineEndings(newContent)))
+        ctx.pushUndo(filePath, null, newContent)
         ctx.fs.write(filePath, newContent)
         ctx.markRead(filePath)
-        const diff = trimDiff(createTwoFilesPatch(filePath, filePath, '', normalizeLineEndings(newContent)))
-        lastPatch = diff
-        lastPath = filePath
+        fileDiffs.push({ filepath: filePath, diff })
         summaries.push(`A ${filePath}`)
         continue
       }
@@ -66,16 +64,14 @@ export const applyPatchTool: AgentToolDef = {
           throw new Error(`apply_patch verification failed: Failed to read file to delete: ${filePath}`)
         }
         const oldContent = ctx.fs.read(filePath)
-        ctx.pushUndo(filePath, oldContent)
-        ctx.fs.delete(filePath)
         const diff = trimDiff(createTwoFilesPatch(filePath, filePath, normalizeLineEndings(oldContent), ''))
-        lastPatch = diff
-        lastPath = filePath
+        ctx.pushUndo(filePath, oldContent, null)
+        ctx.fs.delete(filePath)
+        fileDiffs.push({ filepath: filePath, diff })
         summaries.push(`D ${filePath}`)
         continue
       }
 
-      // update
       if (!ctx.fs.exists(filePath)) {
         throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
       }
@@ -87,12 +83,9 @@ export const applyPatchTool: AgentToolDef = {
         throw new Error(`apply_patch verification failed: ${error instanceof Error ? error.message : String(error)}`)
       }
 
-      ctx.pushUndo(filePath, oldContent)
       if (hunk.move_path) {
         const movePath = normalizePath(hunk.move_path)
-        ctx.fs.write(movePath, fileUpdate.content)
-        ctx.fs.delete(filePath)
-        ctx.markRead(movePath)
+        const moveBefore = ctx.fs.exists(movePath) ? ctx.fs.read(movePath) : null
         const diff = trimDiff(
           createTwoFilesPatch(
             filePath,
@@ -101,12 +94,14 @@ export const applyPatchTool: AgentToolDef = {
             normalizeLineEndings(fileUpdate.content),
           ),
         )
-        lastPatch = diff
-        lastPath = movePath
+        ctx.pushUndo(filePath, oldContent, null)
+        ctx.pushUndo(movePath, moveBefore, fileUpdate.content)
+        ctx.fs.write(movePath, fileUpdate.content)
+        ctx.fs.delete(filePath)
+        ctx.markRead(movePath)
+        fileDiffs.push({ filepath: movePath, diff })
         summaries.push(`M ${filePath} -> ${movePath}`)
       } else {
-        ctx.fs.write(filePath, fileUpdate.content)
-        ctx.markRead(filePath)
         const diff = trimDiff(
           createTwoFilesPatch(
             filePath,
@@ -115,19 +110,27 @@ export const applyPatchTool: AgentToolDef = {
             normalizeLineEndings(fileUpdate.content),
           ),
         )
-        lastPatch = diff
-        lastPath = filePath
+        ctx.pushUndo(filePath, oldContent, fileUpdate.content)
+        ctx.fs.write(filePath, fileUpdate.content)
+        ctx.markRead(filePath)
+        fileDiffs.push({ filepath: filePath, diff })
         summaries.push(`M ${filePath}`)
       }
     }
 
-    if (lastPath && lastPatch) {
-      ctx.setLastDiff({ path: lastPath, patch: lastPatch })
+    const last = fileDiffs[fileDiffs.length - 1]
+    if (last) {
+      ctx.setLastDiff({ path: last.filepath, patch: last.diff })
     }
 
     return {
       title: `${summaries.length} file(s)`,
       output: `Patch applied successfully.\n${summaries.join('\n')}`,
+      metadata: {
+        files: fileDiffs,
+        filepath: last?.filepath,
+        diff: last?.diff,
+      },
     }
   },
 }

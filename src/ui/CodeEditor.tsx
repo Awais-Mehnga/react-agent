@@ -5,6 +5,7 @@ import { useAgentStore } from '../agent/session/store'
 import { usePageEditorStore, VIEWPORTS } from '../page/editorStore'
 import { isAllowedWorkspacePath } from '../page/allowedFiles'
 import { ExternalLink } from 'lucide-react'
+import { DiffPanel } from './DiffPanel'
 
 function isHtmlPath(path: string) {
   return /\.html?$/i.test(path)
@@ -13,13 +14,26 @@ function isHtmlPath(path: string) {
 /** Build a clean, fully interactive preview document — no editor scripts, no click interception. */
 function buildPreviewDocument(html: string, themeCss: string): string {
   const twUrl = `${window.location.origin}/vendor/tailwind-browser.js`
+  // @import inside text/tailwindcss breaks the browser runtime — load fonts as <link>
+  const fontUrls: string[] = []
+  const css = themeCss.replace(
+    /@import\s+url\(["']?([^"')]+)["']?\)\s*;?/gi,
+    (_full, href: string) => {
+      fontUrls.push(href)
+      return ''
+    },
+  )
+  const fontLinks = fontUrls
+    .map((href) => `<link rel="stylesheet" href="${href}" />`)
+    .join('\n')
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+${fontLinks}
 <style type="text/tailwindcss">
-${themeCss}
+${css.trim()}
 </style>
 <script src="${twUrl}"></script>
 <style>
@@ -130,7 +144,7 @@ export function CodeEditor() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         {isHtmlPath(selectedPath) && effectiveMode === 'visual' ? (
           <div className="flex h-full min-h-0 justify-center overflow-auto bg-zinc-800/80 p-3">
             <div
@@ -157,6 +171,7 @@ export function CodeEditor() {
           />
         )}
       </div>
+      <DiffPanel />
     </div>
   )
 }

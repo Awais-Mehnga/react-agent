@@ -12,7 +12,12 @@ type Props = {
 }
 
 export function InspectorPanel({ onCollapse }: Props) {
-  const files = useAgentStore((s) => s.files)
+  const filePaths = useAgentStore((s) =>
+    Object.keys(s.files).filter(isAllowedWorkspacePath).sort().join('\0'),
+  )
+  const paths = filePaths ? filePaths.split('\0') : []
+  const pageHtml = useAgentStore((s) => s.files['page.html'] ?? '')
+  const themeCss = useAgentStore((s) => s.files['theme.css'])
   const selectedPath = useAgentStore((s) => s.selectedPath)
   const selectFile = useAgentStore((s) => s.selectFile)
   const selection = usePageEditorStore((s) => s.selection)
@@ -22,27 +27,39 @@ export function InspectorPanel({ onCollapse }: Props) {
   const error = usePageEditorStore((s) => s.error)
   const applyClass = usePageEditorStore((s) => s.applyClass)
   const applyStubAttr = usePageEditorStore((s) => s.applyStubAttr)
+  const applyAttr = usePageEditorStore((s) => s.applyAttr)
   const setSaving = usePageEditorStore((s) => s.setSaving)
   const setLastSave = usePageEditorStore((s) => s.setLastSave)
   const setError = usePageEditorStore((s) => s.setError)
 
   const [classDraft, setClassDraft] = useState('')
-  const paths = Object.keys(files).filter(isAllowedWorkspacePath).sort()
+  const [srcDraft, setSrcDraft] = useState('')
+  const [altDraft, setAltDraft] = useState('')
+  const [hrefDraft, setHrefDraft] = useState('')
+  const [targetDraft, setTargetDraft] = useState('')
   const stub = getStubDefinition(selection?.stubId)
-  const html = files['page.html'] ?? ''
 
   useEffect(() => {
     setClassDraft(selection?.className ?? '')
-  }, [selection?.eid, selection?.className])
+    setSrcDraft(selection?.attrs.src ?? '')
+    setAltDraft(selection?.attrs.alt ?? '')
+    setHrefDraft(selection?.attrs.href ?? '')
+    setTargetDraft(selection?.attrs.target ?? '')
+  }, [
+    selection?.eid,
+    selection?.className,
+    selection?.attrs.src,
+    selection?.attrs.alt,
+    selection?.attrs.href,
+    selection?.attrs.target,
+  ])
 
   const onSave = async () => {
     setError(null)
     setSaving(true)
     try {
-      const saved = await compilePageCss(html)
-      // Prefer workspace theme.css if present
-      const theme = files['theme.css']
-      const payload = theme ? { ...saved, theme } : saved
+      const saved = await compilePageCss(pageHtml)
+      const payload = themeCss ? { ...saved, theme: themeCss } : saved
       setLastSave(payload)
       console.log('[page-builder] SavedPage', payload)
     } catch (e) {
@@ -129,9 +146,7 @@ export function InspectorPanel({ onCollapse }: Props) {
           </p>
         ) : selection ? (
           <div className="space-y-3">
-            <div className="font-mono text-xs text-zinc-300">
-              &lt;{selection.tagName}&gt;
-            </div>
+            <div className="font-mono text-xs text-zinc-300">&lt;{selection.tagName}&gt;</div>
             <label className="block text-[11px] text-zinc-500">
               Classes
               <textarea
@@ -144,6 +159,79 @@ export function InspectorPanel({ onCollapse }: Props) {
                 className="mt-1 w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-100 outline-none focus:border-blue-500"
               />
             </label>
+
+            {selection.isMedia ? (
+              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+                <div className="text-xs font-medium text-zinc-300">
+                  {selection.isMedia === 'image' ? 'Image' : 'Video'}
+                </div>
+                <label className="block text-[11px] text-zinc-500">
+                  URL (src)
+                  <input
+                    type="url"
+                    value={srcDraft}
+                    onChange={(e) => setSrcDraft(e.target.value)}
+                    onBlur={() => {
+                      if (srcDraft !== (selection.attrs.src ?? '')) applyAttr('src', srcDraft)
+                    }}
+                    className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-blue-500"
+                    placeholder="https://…"
+                  />
+                </label>
+                {selection.isMedia === 'image' ? (
+                  <label className="block text-[11px] text-zinc-500">
+                    Alt text
+                    <input
+                      type="text"
+                      value={altDraft}
+                      onChange={(e) => setAltDraft(e.target.value)}
+                      onBlur={() => {
+                        if (altDraft !== (selection.attrs.alt ?? '')) applyAttr('alt', altDraft)
+                      }}
+                      className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-blue-500"
+                      placeholder="Describe the image"
+                    />
+                  </label>
+                ) : null}
+                <p className="text-[10px] text-zinc-600">
+                  Tip: double-click the media on canvas to pick a file/URL.
+                </p>
+              </div>
+            ) : null}
+
+            {selection.isAnchor ? (
+              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+                <div className="text-xs font-medium text-zinc-300">Link</div>
+                <label className="block text-[11px] text-zinc-500">
+                  Href
+                  <input
+                    type="text"
+                    value={hrefDraft}
+                    onChange={(e) => setHrefDraft(e.target.value)}
+                    onBlur={() => {
+                      if (hrefDraft !== (selection.attrs.href ?? '')) applyAttr('href', hrefDraft)
+                    }}
+                    className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-blue-500"
+                    placeholder="# or https://…"
+                  />
+                </label>
+                <label className="block text-[11px] text-zinc-500">
+                  Target
+                  <input
+                    type="text"
+                    value={targetDraft}
+                    onChange={(e) => setTargetDraft(e.target.value)}
+                    onBlur={() => {
+                      if (targetDraft !== (selection.attrs.target ?? ''))
+                        applyAttr('target', targetDraft)
+                    }}
+                    className="mt-0.5 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-blue-500"
+                    placeholder="_blank"
+                  />
+                </label>
+              </div>
+            ) : null}
+
             {stub ? (
               <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
                 <div className="text-xs font-medium text-zinc-300">{stub.label}</div>
@@ -160,15 +248,16 @@ export function InspectorPanel({ onCollapse }: Props) {
                   </label>
                 ))}
               </div>
-            ) : (
+            ) : !selection.isMedia && !selection.isAnchor ? (
               <p className="text-[11px] text-zinc-500">
                 Double-click text to edit · Double-click image/video for media
               </p>
-            )}
+            ) : null}
           </div>
         ) : (
           <p className="text-[11px] text-zinc-500">
-            Click an element to inspect classes and stubs. Ask the agent (left) to redesign the page.
+            Click an element to inspect classes, media URLs, links, and stubs. Ask the agent (left)
+            to redesign the page.
           </p>
         )}
       </div>

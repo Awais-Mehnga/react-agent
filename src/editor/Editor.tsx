@@ -21,10 +21,11 @@ export function Editor({ html, themeCss, onChange }: Props) {
 
   const freezeAnimations = isEditing || isRunning
 
+  // PORT: register canvas handle once — do not null on every html/theme stream tick
   useLayoutEffect(() => {
     setCanvas(canvasRef.current)
     return () => setCanvas(null)
-  }, [setCanvas, html, themeCss])
+  }, [setCanvas])
 
   const onHtmlChange = useCallback(
     (next: string) => {

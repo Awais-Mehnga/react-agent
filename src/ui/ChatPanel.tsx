@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { memo, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   Brain,
   Check,
@@ -20,11 +20,12 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { useAgentStore, type ChatPart } from '../agent/session/store'
+import { useAgentStore, type ChatMessage, type ChatPart } from '../agent/session/store'
 
 import { runAgentTurn } from '../agent/loop'
 import { currentModelId, currentProvider } from '../agent/llm'
 import { usePageEditorStore } from '../page/editorStore'
+import { DiffView } from './DiffView'
 
 type Props = {
   onCollapse?: () => void
@@ -40,12 +41,20 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-function ToolCard({ part }: { part: Extract<ChatPart, { type: 'tool' }> }) {
-  const [open, setOpen] = useState(false)
+const ToolCard = memo(function ToolCard({
+  part,
+}: {
+  part: Extract<ChatPart, { type: 'tool' }>
+}) {
+  const [open, setOpen] = useState(
+    part.status === 'pending' || part.status === 'running' || Boolean(part.metadata?.diff),
+  )
   const isWrite = part.toolName === 'write'
   const isEdit = part.toolName === 'edit'
   const isRead = part.toolName === 'read'
-  const filePath = (part.args as { filePath?: string } | undefined)?.filePath
+  const filePath =
+    part.metadata?.filepath ??
+    (part.args as { filePath?: string } | undefined)?.filePath
 
   const icon = isEdit ? (
     <FileEdit className="size-3.5 text-sky-400" />
@@ -57,18 +66,26 @@ function ToolCard({ part }: { part: Extract<ChatPart, { type: 'tool' }> }) {
     <Wrench className="size-3.5 text-zinc-400" />
   )
 
-  const label = part.result || `${part.toolName} ${filePath ?? ''}`.trim()
-  const hasDetails = Boolean(part.result && part.result.length > 40)
+  const statusLabel =
+    part.status === 'pending'
+      ? 'Streaming…'
+      : part.status === 'running'
+        ? 'Running…'
+        : part.result || part.toolName
+
+  const hasDiff = Boolean(part.metadata?.diff)
+  const hasRaw = Boolean(part.raw && part.status === 'pending')
+  const expandable = hasDiff || hasRaw || Boolean(part.result && part.result.length > 40)
 
   return (
     <div className="rounded-lg border border-zinc-800/80 bg-zinc-900/60 p-2 text-xs transition-colors hover:border-zinc-700/80">
       <div
-        className={`flex items-center justify-between gap-2 ${hasDetails ? 'cursor-pointer select-none' : ''}`}
-        onClick={() => hasDetails && setOpen((prev) => !prev)}
+        className={`flex items-center justify-between gap-2 ${expandable ? 'cursor-pointer select-none' : ''}`}
+        onClick={() => expandable && setOpen((prev) => !prev)}
       >
         <div className="flex min-w-0 items-center gap-2">
           {icon}
-          <span className="truncate font-mono text-[11px] text-zinc-200">{label}</span>
+          <span className="truncate font-mono text-[11px] text-zinc-200">{statusLabel}</span>
           {filePath && (
             <span className="rounded bg-zinc-800 px-1.5 py-0.2 font-mono text-[10px] text-zinc-400">
               {filePath}
@@ -76,32 +93,48 @@ function ToolCard({ part }: { part: Extract<ChatPart, { type: 'tool' }> }) {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {part.status === 'running' ? (
+          {part.status === 'pending' || part.status === 'running' ? (
             <Loader2 className="size-3 animate-spin text-amber-400" />
           ) : part.status === 'error' ? (
-            <span className="rounded bg-red-950 px-1.5 py-0.2 text-[10px] text-red-400 border border-red-800/50">
+            <span className="rounded border border-red-800/50 bg-red-950 px-1.5 py-0.2 text-[10px] text-red-400">
               Error
             </span>
           ) : (
             <CheckCircle2 className="size-3 text-emerald-400" />
           )}
-          {hasDetails && (
+          {expandable && (
             <button type="button" className="text-zinc-500 hover:text-zinc-300">
               {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
             </button>
           )}
         </div>
       </div>
-      {open && hasDetails && (
+      {open && hasDiff && part.metadata?.diff ? (
+        <div className="mt-2 max-h-48 overflow-auto rounded border border-zinc-800 bg-zinc-950 p-2">
+          <DiffView patch={part.metadata.diff} path={filePath} />
+        </div>
+      ) : null}
+      {open && hasRaw && !hasDiff ? (
+        <pre className="mt-2 max-h-32 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-500">
+          {part.raw}
+        </pre>
+      ) : null}
+      {open && !hasDiff && part.result && part.result.length > 40 ? (
         <pre className="mt-2 max-h-48 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[10px] leading-relaxed text-zinc-300">
           {part.result}
         </pre>
-      )}
+      ) : null}
     </div>
   )
-}
+})
 
-function ThinkingBlock({ text, isRunning }: { text: string; isRunning: boolean }) {
+const ThinkingBlock = memo(function ThinkingBlock({
+  text,
+  isRunning,
+}: {
+  text: string
+  isRunning: boolean
+}) {
   const [open, setOpen] = useState(isRunning)
 
   useEffect(() => {
@@ -134,7 +167,7 @@ function ThinkingBlock({ text, isRunning }: { text: string; isRunning: boolean }
       )}
     </div>
   )
-}
+})
 
 function CompactionBlock({ summary }: { summary: string }) {
   const [open, setOpen] = useState(false)
@@ -163,9 +196,76 @@ function CompactionBlock({ summary }: { summary: string }) {
   )
 }
 
+const MessageRow = memo(function MessageRow({
+  msg,
+  isLast,
+  isRunning,
+}: {
+  msg: ChatMessage
+  isLast: boolean
+  isRunning: boolean
+}) {
+  const isUser = msg.role === 'user'
+  return (
+    <div className={isUser ? 'ml-4' : 'mr-1'}>
+      <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        {isUser ? 'You' : 'Assistant'}
+      </div>
+
+      <div
+        className={`space-y-2 rounded-xl p-3 ${
+          isUser
+            ? 'border border-sky-800/30 bg-sky-950/25 text-sky-100'
+            : 'border border-zinc-800/50 bg-zinc-900/30 text-zinc-200'
+        }`}
+      >
+        {msg.parts.map((part, idx) => {
+          if (part.type === 'thinking') {
+            return (
+              <ThinkingBlock
+                key={`thinking-${idx}`}
+                text={part.text}
+                isRunning={isRunning && isLast}
+              />
+            )
+          }
+
+          if (part.type === 'compaction') {
+            return <CompactionBlock key={`compaction-${idx}`} summary={part.summary} />
+          }
+
+          if (part.type === 'tool') {
+            return (
+              <ToolCard
+                key={part.callId || part.id || `tool-${idx}`}
+                part={part}
+              />
+            )
+          }
+
+          if (part.type === 'text') {
+            if (!part.text.trim()) return null
+            return (
+              <div
+                key={`text-${idx}`}
+                className="whitespace-pre-wrap break-words text-xs leading-relaxed"
+              >
+                {part.text}
+              </div>
+            )
+          }
+
+          return null
+        })}
+      </div>
+    </div>
+  )
+})
+
 export function ChatPanel({ onCollapse }: Props) {
   const sessions = useAgentStore((s) => s.sessions)
   const currentSessionId = useAgentStore((s) => s.currentSessionId)
+  const messageIds = useAgentStore((s) => s.messages.map((m) => m.id).join(','))
   const messages = useAgentStore((s) => s.messages)
   const todos = useAgentStore((s) => s.todos)
   const isRunning = useAgentStore((s) => s.isRunning)
@@ -180,35 +280,35 @@ export function ChatPanel({ onCollapse }: Props) {
   const [input, setInput] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
 
   const activeSession = sessions.find((s) => s.id === currentSessionId)
   const sessionTitle = activeSession?.title || 'Chat'
   const modelLabel = `${currentProvider()} · ${currentModelId()}`
 
   useEffect(() => {
+    if (!stickToBottom.current) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isRunning])
+  }, [messageIds, isRunning, messages[messages.length - 1]?.parts.length])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     const text = input.trim()
     if (!text || isRunning) return
     setInput('')
+    stickToBottom.current = true
     await runAgentTurn(text)
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-zinc-800 bg-zinc-950 text-zinc-100">
-      {/* Top Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 truncate">
             <span className="text-xs font-semibold tracking-wide text-zinc-200">Agent</span>
             <span className="text-zinc-600">·</span>
-            <span
-              title={sessionTitle}
-              className="truncate text-xs font-medium text-zinc-400"
-            >
+            <span title={sessionTitle} className="truncate text-xs font-medium text-zinc-400">
               {sessionTitle}
             </span>
           </div>
@@ -223,7 +323,7 @@ export function ChatPanel({ onCollapse }: Props) {
               createSession()
               setShowHistory(false)
             }}
-            className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white transition-colors"
+            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white"
           >
             <Plus className="size-4" />
           </button>
@@ -246,7 +346,7 @@ export function ChatPanel({ onCollapse }: Props) {
               type="button"
               title="Collapse agent panel"
               onClick={onCollapse}
-              className="rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+              className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
             >
               <PanelLeftClose className="size-4" />
             </button>
@@ -254,7 +354,6 @@ export function ChatPanel({ onCollapse }: Props) {
         </div>
       </div>
 
-      {/* Main Body: History or Message Timeline */}
       {showHistory ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-950">
           <div className="flex items-center justify-between border-b border-zinc-800/80 px-3 py-2">
@@ -288,8 +387,10 @@ export function ChatPanel({ onCollapse }: Props) {
                 >
                   <div className="min-w-0 flex-1 pr-2">
                     <div className="flex items-center gap-1.5">
-                      {isActive && <span className="size-1.5 shrink-0 rounded-full bg-sky-400 animate-pulse" />}
-                      <div className="truncate font-medium text-xs text-zinc-200">
+                      {isActive && (
+                        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-sky-400" />
+                      )}
+                      <div className="truncate text-xs font-medium text-zinc-200">
                         {sess.title || 'Untitled Chat'}
                       </div>
                     </div>
@@ -323,73 +424,57 @@ export function ChatPanel({ onCollapse }: Props) {
                 createSession()
                 setShowHistory(false)
               }}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-800"
             >
               <Plus className="size-3.5" /> New Chat
             </button>
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3 text-sm">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3 text-sm"
+          onScroll={() => {
+            const el = scrollRef.current
+            if (!el) return
+            stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+          }}
+        >
           {messages.length === 0 && (
             <div className="rounded-lg border border-zinc-800/70 bg-zinc-900/30 p-3.5 text-xs leading-relaxed text-zinc-400">
               <p className="font-medium text-zinc-300">OpenCode-Powered Agent</p>
               <p className="mt-1">
-                Ask for page designs, visual edits, or theme styling. The canvas previews in real time.
+                Ask for page designs, visual edits, or theme styling. Activity steps expand like
+                Cursor — thinking, tools, and diffs.
               </p>
             </div>
           )}
 
-          {messages.map((msg) => {
-            const isUser = msg.role === 'user'
-            return (
-              <div key={msg.id} className={isUser ? 'ml-4' : 'mr-1'}>
-                <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                  {isUser ? 'You' : 'Assistant'}
-                </div>
+          {messages.map((msg, idx) => (
+            <MessageRow
+              key={msg.id}
+              msg={msg}
+              isLast={idx === messages.length - 1}
+              isRunning={isRunning}
+            />
+          ))}
 
-                <div
-                  className={`space-y-2 rounded-xl p-3 ${
-                    isUser
-                      ? 'border border-sky-800/30 bg-sky-950/25 text-sky-100'
-                      : 'border border-zinc-800/50 bg-zinc-900/30 text-zinc-200'
-                  }`}
-                >
-                  {msg.parts.map((part, i) => {
-                    if (part.type === 'thinking') {
-                      const isCurrentRunning =
-                        isRunning && msg.id === messages[messages.length - 1]?.id
-                      return <ThinkingBlock key={i} text={part.text} isRunning={isCurrentRunning} />
-                    }
-
-                    if (part.type === 'compaction') {
-                      return <CompactionBlock key={i} summary={part.summary} />
-                    }
-
-                    if (part.type === 'tool') {
-                      return <ToolCard key={i} part={part} />
-                    }
-
-                    if (part.type === 'text') {
-                      if (!part.text.trim()) return null
-                      return (
-                        <div key={i} className="whitespace-pre-wrap break-words leading-relaxed text-xs">
-                          {part.text}
-                        </div>
-                      )
-                    }
-
-                    return null
-                  })}
-                </div>
+          {isRunning && messages[messages.length - 1]?.role === 'assistant' &&
+            !(messages[messages.length - 1]?.parts.some(
+              (p) =>
+                p.type === 'thinking' ||
+                p.type === 'tool' ||
+                (p.type === 'text' && p.text.trim()),
+            )) && (
+              <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-[11px] text-zinc-400">
+                <Loader2 className="size-3.5 animate-spin text-amber-400" />
+                Working…
               </div>
-            )
-          })}
+            )}
 
-          {/* Todos / Tasks display */}
           {todos.length > 0 && (
             <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5 text-xs">
-              <div className="mb-1.5 flex items-center gap-1.5 font-medium text-zinc-400 text-[11px]">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
                 <ListTodo className="size-3.5 text-sky-400" />
                 Tasks
               </div>
@@ -397,7 +482,7 @@ export function ChatPanel({ onCollapse }: Props) {
                 {todos.map((todo) => (
                   <li key={todo.id} className="flex items-center gap-2 text-zinc-300">
                     <span
-                      className={`size-3 rounded border flex items-center justify-center ${
+                      className={`flex size-3 items-center justify-center rounded border ${
                         todo.status === 'completed'
                           ? 'border-emerald-500 bg-emerald-500/20 text-emerald-400'
                           : 'border-zinc-600 bg-zinc-800'
@@ -405,7 +490,7 @@ export function ChatPanel({ onCollapse }: Props) {
                     >
                       {todo.status === 'completed' && <Check className="size-2.5" />}
                     </span>
-                    <span className={todo.status === 'completed' ? 'line-through text-zinc-500' : ''}>
+                    <span className={todo.status === 'completed' ? 'text-zinc-500 line-through' : ''}>
                       {todo.content}
                     </span>
                   </li>
@@ -424,7 +509,6 @@ export function ChatPanel({ onCollapse }: Props) {
         </div>
       )}
 
-      {/* Selected Element Context Pill */}
       {selection && (
         <div className="flex items-center justify-between border-t border-sky-900/50 bg-sky-950/40 px-3 py-1.5 text-xs text-zinc-300">
           <div className="flex items-center gap-1.5 truncate">
@@ -441,34 +525,33 @@ export function ChatPanel({ onCollapse }: Props) {
             type="button"
             title="Clear element selection"
             onClick={() => setSelection(null)}
-            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors ml-2 shrink-0"
+            className="ml-2 shrink-0 rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
           >
             <X className="size-3.5" />
           </button>
         </div>
       )}
 
-      {/* Input Bar */}
       <form onSubmit={onSubmit} className="flex gap-2 border-t border-zinc-800 p-2.5">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask the agent to edit page.html or theme.css…"
-          className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs outline-none focus:border-zinc-500 text-zinc-100 placeholder:text-zinc-500"
+          className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500"
           disabled={isRunning}
         />
         {isRunning ? (
           <button
             type="button"
             onClick={abort}
-            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium hover:bg-zinc-700 text-zinc-200 transition-colors"
+            className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-700"
           >
             <Square className="size-3" /> Stop
           </button>
         ) : (
           <button
             type="submit"
-            className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium hover:bg-sky-500 disabled:opacity-40 text-white transition-colors"
+            className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:opacity-40"
             disabled={!input.trim()}
           >
             <Send className="size-3" /> Send

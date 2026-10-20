@@ -9,15 +9,22 @@ export type ToolContext = {
   wasRead: (path: string) => boolean
   markRead: (path: string) => void
   abort: AbortSignal
-  pushUndo: (path: string, before: string | null) => void
+  pushUndo: (path: string, before: string | null, after?: string | null) => void
   setLastDiff: (diff: LastDiff | null) => void
   setTodos: (todos: TodoItem[]) => void
   askQuestion: (questions: QuestionPrompt[]) => Promise<string[][]>
 }
 
+export type ToolResultMetadata = {
+  filepath?: string
+  diff?: string
+  files?: Array<{ filepath: string; diff: string }>
+}
+
 export type ToolResult = {
   output: string
   title?: string
+  metadata?: ToolResultMetadata
 }
 
 export type AgentToolDef<T = unknown> = {

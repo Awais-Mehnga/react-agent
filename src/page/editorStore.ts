@@ -36,6 +36,7 @@ type PageEditorState = {
   setError: (error: string | null) => void
   applyClass: (className: string) => void
   applyStubAttr: (key: string, value: string) => void
+  applyAttr: (name: string, value: string) => void
 }
 
 export const usePageEditorStore = create<PageEditorState>((set, get) => ({
@@ -69,5 +70,10 @@ export const usePageEditorStore = create<PageEditorState>((set, get) => ({
     const { selection, canvas } = get()
     if (!selection || !canvas) return
     canvas.applyStubAttr(selection.eid, key, value)
+  },
+  applyAttr: (name, value) => {
+    const { selection, canvas } = get()
+    if (!selection || !canvas) return
+    canvas.applyAttr(selection.eid, name, value)
   },
 }))

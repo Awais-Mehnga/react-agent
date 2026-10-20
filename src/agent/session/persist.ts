@@ -81,19 +81,33 @@ export async function hydrateFromIdb(): Promise<void> {
 export function bindPersistSubscription(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
 
-  const unsub = useAgentStore.subscribe((state) => {
+  const unsub = useAgentStore.subscribe((state, prev) => {
     if (!state.hydrated) return
+    // PORT: skip high-churn streaming ticks; persist on idle or file/session changes
+    if (state.isRunning) return
+    if (
+      state.files === prev.files &&
+      state.messages === prev.messages &&
+      state.sessions === prev.sessions &&
+      state.todos === prev.todos &&
+      state.selectedPath === prev.selectedPath &&
+      state.currentSessionId === prev.currentSessionId
+    ) {
+      return
+    }
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => {
+      const s = useAgentStore.getState()
+      if (s.isRunning) return
       void saveSession({
-        files: state.files,
-        sessions: state.sessions,
-        currentSessionId: state.currentSessionId,
-        messages: state.messages,
-        todos: state.todos,
-        selectedPath: state.selectedPath,
+        files: s.files,
+        sessions: s.sessions,
+        currentSessionId: s.currentSessionId,
+        messages: s.messages,
+        todos: s.todos,
+        selectedPath: s.selectedPath,
       })
-    }, 300)
+    }, 400)
   })
 
   return () => {

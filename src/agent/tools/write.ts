@@ -7,6 +7,7 @@ import description from '../vendor/opencode/tools/write.txt?raw'
 import { normalizeLineEndings, trimDiff } from '../vendor/opencode/edit-replace'
 import { assertAllowedWorkspacePath } from '../../page/allowedFiles'
 import { normalizePageHtml } from '../../html/normalizePageHtml'
+import { normalizePath } from '../fs/paths'
 
 export const writeTool: AgentToolDef = {
   id: 'write',
@@ -16,36 +17,42 @@ export const writeTool: AgentToolDef = {
     content: z.string().describe('Full file contents'),
   }),
   execute: async (args, ctx) => {
-    const { filePath } = args as { filePath: string; content: string }
+    const filePath = normalizePath((args as { filePath: string }).filePath)
     let { content } = args as { filePath: string; content: string }
     assertAllowedWorkspacePath(filePath)
     if (/\.html?$/i.test(filePath)) {
       content = normalizePageHtml(content)
     }
     const exists = ctx.fs.exists(filePath)
-    if (exists && !ctx.wasRead(filePath)) {
-      throw new Error('You must use the Read tool first before overwriting an existing file.')
-    }
+    // PORT: page-builder seed files are always present — do not block overwrite on wasRead
+    // (OpenCode read-first is guidance in the tool description; hard-fail caused doom loops).
     const before = exists ? ctx.fs.read(filePath) : null
-    ctx.pushUndo(filePath, before)
+    let patch = ''
+    try {
+      patch = trimDiff(
+        createTwoFilesPatch(
+          filePath,
+          filePath,
+          normalizeLineEndings(before ?? ''),
+          normalizeLineEndings(content),
+        ),
+      )
+    } catch (e) {
+      console.warn('[write] diff failed', e)
+      patch = `--- ${filePath}\n+++ ${filePath}\n@@ updated @@\n`
+    }
+
+    ctx.pushUndo(filePath, before, content)
     ctx.fs.write(filePath, content)
     ctx.markRead(filePath)
-
-    const patch = trimDiff(
-      createTwoFilesPatch(
-        filePath,
-        filePath,
-        normalizeLineEndings(before ?? ''),
-        normalizeLineEndings(content),
-      ),
-    )
     ctx.setLastDiff({ path: filePath, patch })
 
     return {
       output: exists
-        ? `Updated ${filePath} (${content.length} chars). Canvas preview refreshed.`
-        : `Created ${filePath}. Canvas preview refreshed.`,
+        ? `Updated ${filePath} (${content.length} chars). Canvas preview refreshed. For later edits, re-read the file — stored markup may be normalized.`
+        : `Created ${filePath}. Canvas preview refreshed. For later edits, re-read the file — stored markup may be normalized.`,
       title: filePath,
+      metadata: { filepath: filePath, diff: patch },
     }
   },
 }

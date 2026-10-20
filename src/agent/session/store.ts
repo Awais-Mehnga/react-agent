@@ -1,4 +1,4 @@
-// GREENFIELD: Zustand session + workspace store (Phase 1 + Phase 2 polish).
+// GREENFIELD: Zustand session + workspace store (streaming timeline + undo/redo).
 
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
@@ -11,10 +11,26 @@ import { assertAllowedWorkspacePath, filterAllowedFiles } from '../../page/allow
 
 export type ChatRole = 'user' | 'assistant' | 'system'
 
+export type ToolPartStatus = 'pending' | 'running' | 'done' | 'error'
+
 export type ChatPart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
-  | { type: 'tool'; toolName: string; status: 'running' | 'done' | 'error'; args?: unknown; result?: string }
+  | {
+      type: 'tool'
+      id: string
+      callId?: string
+      toolName: string
+      status: ToolPartStatus
+      raw?: string
+      args?: unknown
+      result?: string
+      metadata?: {
+        filepath?: string
+        diff?: string
+        files?: Array<{ filepath: string; diff: string }>
+      }
+    }
   | { type: 'compaction'; summary: string }
 
 export type ChatMessage = {
@@ -31,7 +47,6 @@ export type SessionItem = {
   updatedAt: number
 }
 
-
 export type TodoItem = {
   id: string
   content: string
@@ -42,6 +57,7 @@ export type TodoItem = {
 export type UndoEntry = {
   path: string
   before: string | null
+  after: string | null
 }
 
 export type LastDiff = {
@@ -68,41 +84,54 @@ export type PendingQuestion = {
   reject: (reason?: Error) => void
 }
 
+
+
 export const SEED_FILES: Record<string, string> = {
-  'page.html': `<section class="py-24 bg-surface">
-  <div class="mx-auto max-w-6xl px-6">
-    <h1 class="text-5xl font-bold text-ink animate-fade-in">
-      Build something beautiful
-    </h1>
-    <p class="mt-4 max-w-2xl text-lg text-ink-muted">
-      Double-click this text to edit. Double-click the image to replace it. Ask the agent to redesign the page.
-    </p>
-    <img
-      src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=1200&q=80"
-      alt="Workspace"
-      class="mt-8 w-full rounded-card shadow-lg">
-    <div class="mt-10">
-      <a href="#" class="inline-block rounded-button bg-brand px-6 py-3 font-medium text-white">
-        Get started
-      </a>
+  'page.html': `<section class="relative min-h-[85vh] overflow-hidden bg-surface">
+  <div class="mx-auto grid min-h-[85vh] max-w-6xl items-center gap-10 px-6 py-16 lg:grid-cols-12">
+    <div class="lg:col-span-5 animate-slide-up">
+      <p class="font-sans text-sm font-medium tracking-wide text-brand uppercase">RemoteShifts</p>
+      <h1 class="font-display mt-4 text-5xl font-bold leading-[1.05] tracking-tight text-ink md:text-6xl">
+        Shifts that feel human again
+      </h1>
+      <p class="font-sans mt-5 max-w-md text-lg text-ink-muted">
+        Double-click copy to edit. Ask the agent to redesign — it must pick expressive fonts and a real brand direction.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center gap-4">
+        <a href="#" class="font-sans inline-block rounded-button bg-brand px-6 py-3 text-sm font-medium text-white transition duration-200 hover:-translate-y-0.5">
+          Start a schedule
+        </a>
+        <a href="#stories" class="font-sans text-sm font-medium text-ink underline decoration-brand/40 underline-offset-4">
+          Read stories
+        </a>
+      </div>
+    </div>
+    <div class="lg:col-span-7 animate-fade-in">
+      <img
+        src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=1400&q=80"
+        alt="Team collaborating across a long table"
+        class="h-full min-h-[280px] w-full rounded-card object-cover shadow-lg">
     </div>
   </div>
 </section>
 
-<section class="py-20 bg-surface-muted">
+<section id="stories" class="bg-surface-muted py-20">
   <div class="mx-auto max-w-6xl px-6">
-    <h2 class="text-3xl font-bold text-ink">Latest articles</h2>
+    <div class="flex items-end justify-between gap-6">
+      <h2 class="font-display text-3xl font-bold tracking-tight text-ink md:text-4xl">Latest articles</h2>
+      <p class="font-sans hidden max-w-xs text-sm text-ink-muted md:block">Stub grid — Laravel fills real posts later.</p>
+    </div>
     <div
       data-stub="blog-grid"
       data-source="posts"
       data-limit="6"
       data-category="all"
-      class="mt-10 grid gap-8 md:grid-cols-3">
-      <article data-slot="item" class="rounded-card bg-surface p-6 shadow-sm">
-        <img data-field="image" alt="" class="aspect-video w-full rounded-xl object-cover" src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&q=80">
-        <h3 data-field="title" class="mt-4 text-xl font-semibold text-ink">Sample post</h3>
-        <p data-field="excerpt" class="mt-2 text-ink-muted">A stub card — Laravel fills real posts later.</p>
-        <a data-field="url" href="#" class="mt-4 inline-block text-brand">Read more</a>
+      class="mt-10 grid gap-8 md:grid-cols-2">
+      <article data-slot="item" class="md:col-span-1">
+        <img data-field="image" alt="" class="aspect-[16/10] w-full rounded-card object-cover" src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&q=80">
+        <h3 data-field="title" class="font-display mt-4 text-2xl font-semibold text-ink">Sample post</h3>
+        <p data-field="excerpt" class="font-sans mt-2 text-ink-muted">A stub card — platform fills real posts later.</p>
+        <a data-field="url" href="#" class="font-sans mt-4 inline-block text-brand">Read more</a>
       </article>
     </div>
   </div>
@@ -111,8 +140,9 @@ export const SEED_FILES: Record<string, string> = {
   'theme.css': themeSeed,
 }
 
-
 const UNDO_CAP = 50
+
+
 
 type AgentState = {
   files: Record<string, string>
@@ -126,6 +156,7 @@ type AgentState = {
   readSet: Set<string>
   abortController: AbortController | null
   undoStack: UndoEntry[]
+  redoStack: UndoEntry[]
   lastDiff: LastDiff | null
   pendingQuestion: PendingQuestion | null
   hydrated: boolean
@@ -142,6 +173,7 @@ type AgentState = {
   wasRead: (path: string) => boolean
   addMessage: (message: ChatMessage) => void
   updateMessage: (id: string, updater: (msg: ChatMessage) => ChatMessage) => void
+  syncCurrentSession: () => void
   createSession: (title?: string) => string
   switchSession: (id: string) => void
   deleteSession: (id: string) => void
@@ -152,8 +184,9 @@ type AgentState = {
   abort: () => void
   getFS: () => VirtualFS
 
-  pushUndo: (path: string, before: string | null) => void
+  pushUndo: (path: string, before: string | null, after?: string | null) => void
   undo: () => boolean
+  redo: () => boolean
   setLastDiff: (diff: LastDiff | null) => void
   setTodos: (todos: TodoItem[]) => void
   askQuestion: (questions: QuestionPrompt[]) => Promise<string[][]>
@@ -197,6 +230,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   readSet: new Set<string>(),
   abortController: null,
   undoStack: [],
+  redoStack: [],
   lastDiff: null,
   pendingQuestion: null,
   hydrated: false,
@@ -252,27 +286,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   wasRead: (path) => get().readSet.has(normalizePath(path)),
 
-  addMessage: (message) =>
-    set((s) => {
-      const messages = [...s.messages, message]
-      const sessions = s.sessions.map((sess) =>
-        sess.id === s.currentSessionId
-          ? { ...sess, messages, updatedAt: Date.now() }
-          : sess,
-      )
-      return { messages, sessions }
-    }),
+  addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
 
+  // PORT: do not mirror sessions on every token — sync on turn end
   updateMessage: (id, updater) =>
-    set((s) => {
-      const messages = s.messages.map((m) => (m.id === id ? updater(m) : m))
-      const sessions = s.sessions.map((sess) =>
-        sess.id === s.currentSessionId
-          ? { ...sess, messages, updatedAt: Date.now() }
-          : sess,
-      )
-      return { messages, sessions }
-    }),
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === id ? updater(m) : m)),
+    })),
+
+  syncCurrentSession: () => {
+    const { currentSessionId, messages, sessions } = get()
+    set({
+      sessions: sessions.map((sess) =>
+        sess.id === currentSessionId ? { ...sess, messages, updatedAt: Date.now() } : sess,
+      ),
+    })
+  },
 
   createSession: (title = 'New Chat') => {
     const id = nanoid()
@@ -284,7 +313,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       updatedAt: Date.now(),
     }
     set((s) => {
-      // Sync active session before switching
       const sessions = s.sessions.map((sess) =>
         sess.id === s.currentSessionId ? { ...sess, messages: s.messages } : sess,
       )
@@ -336,7 +364,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     if (currentSessionId === id) {
-      const nextSession = remaining[0]
+      const nextSession = remaining[0]!
       set({
         sessions: remaining,
         currentSessionId: nextSession.id,
@@ -376,13 +404,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }))
   },
 
-
-  setRunning: (running, controller = null) =>
+  setRunning: (running, controller = null) => {
     set({
       isRunning: running,
       abortController: running ? controller : null,
       error: running ? null : get().error,
-    }),
+    })
+    if (!running) get().syncCurrentSession()
+  },
 
   setError: (error) => set({ error }),
 
@@ -390,6 +419,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     get().abortController?.abort()
     get().cancelQuestion()
     set({ isRunning: false, abortController: null })
+    get().syncCurrentSession()
   },
 
   getFS: (): VirtualFS =>
@@ -401,18 +431,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       },
     ),
 
-  pushUndo: (path, before) => {
+  pushUndo: (path, before, after = null) => {
     const key = normalizePath(path)
     set((s) => ({
-      undoStack: [...s.undoStack, { path: key, before }].slice(-UNDO_CAP),
+      undoStack: [...s.undoStack, { path: key, before, after }].slice(-UNDO_CAP),
+      redoStack: [],
     }))
   },
 
   undo: () => {
-    const { undoStack, files, fsaRoot } = get()
+    const { undoStack, files, fsaRoot, redoStack } = get()
     if (undoStack.length === 0) return false
-    const entry = undoStack[undoStack.length - 1]
+    const entry = undoStack[undoStack.length - 1]!
     const nextStack = undoStack.slice(0, -1)
+    const currentAfter = files[entry.path] ?? null
     const nextFiles = { ...files }
     if (entry.before === null) {
       delete nextFiles[entry.path]
@@ -424,14 +456,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({
       files: nextFiles,
       undoStack: nextStack,
+      redoStack: [...redoStack, { path: entry.path, before: entry.before, after: currentAfter }].slice(-UNDO_CAP),
       lastDiff: null,
       selectedPath: entry.path in nextFiles ? entry.path : (Object.keys(nextFiles)[0] ?? ''),
     })
-    const root = get().fsaRoot
-    if (root) {
-      if (entry.before === null) void fsaDelete(root, entry.path).catch(() => undefined)
-      else void fsaWrite(root, entry.path, entry.before).catch(() => undefined)
+    return true
+  },
+
+  redo: () => {
+    const { redoStack, files, fsaRoot, undoStack } = get()
+    if (redoStack.length === 0) return false
+    const entry = redoStack[redoStack.length - 1]!
+    const nextRedo = redoStack.slice(0, -1)
+    const currentBefore = files[entry.path] ?? null
+    const nextFiles = { ...files }
+    if (entry.after === null) {
+      delete nextFiles[entry.path]
+      if (fsaRoot) void fsaDelete(fsaRoot, entry.path).catch(() => undefined)
+    } else {
+      nextFiles[entry.path] = entry.after
+      if (fsaRoot) void fsaWrite(fsaRoot, entry.path, entry.after).catch(() => undefined)
     }
+    set({
+      files: nextFiles,
+      redoStack: nextRedo,
+      undoStack: [...undoStack, { path: entry.path, before: currentBefore, after: entry.after }].slice(-UNDO_CAP),
+      selectedPath: entry.path in nextFiles ? entry.path : (Object.keys(nextFiles)[0] ?? ''),
+    })
     return true
   },
 
@@ -441,13 +492,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   askQuestion: (questions) =>
     new Promise<string[][]>((resolve, reject) => {
-      set({
-        pendingQuestion: {
-          questions,
-          resolve,
-          reject,
-        },
-      })
+      set({ pendingQuestion: { questions, resolve, reject } })
     }),
 
   answerQuestion: (answers) => {
@@ -482,14 +527,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         {
           id: defaultId,
           title: messages.length > 0 ? 'Chat 1' : 'New Chat',
-          messages: messages,
+          messages,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
       ]
       currentSessionId = defaultId
     } else {
-      const active = sessions.find((s) => s.id === currentSessionId) ?? sessions[0]
+      const active = sessions.find((s) => s.id === currentSessionId) ?? sessions[0]!
       currentSessionId = active.id
       messages = active.messages
     }
@@ -503,6 +548,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       selectedPath: selected,
       readSet: new Set<string>(),
       undoStack: [],
+      redoStack: [],
       lastDiff: null,
       hydrated: true,
     })
@@ -515,6 +561,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       todos: [],
       readSet: new Set<string>(),
       undoStack: [],
+      redoStack: [],
       lastDiff: null,
       error: null,
       pendingQuestion: null,
@@ -524,7 +571,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setHydrated: (value) => set({ hydrated: value }),
-
   setFsaRoot: (handle, name = null) => set({ fsaRoot: handle, fsaName: name }),
 
   loadFilesFromMap: (files) => {
@@ -535,12 +581,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       selectedPath: merged['page.html'] ? 'page.html' : Object.keys(merged)[0] ?? '',
       readSet: new Set<string>(),
       undoStack: [],
+      redoStack: [],
       lastDiff: null,
     })
   },
 
   setMcpServers: (servers) => set({ mcpServers: servers }),
-
   setMcpToolDefs: (tools) => set({ mcpToolDefs: tools }),
 }))
 

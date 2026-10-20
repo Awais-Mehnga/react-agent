@@ -13,6 +13,7 @@ import {
 } from '../vendor/opencode/edit-replace'
 import { assertAllowedWorkspacePath } from '../../page/allowedFiles'
 import { normalizePageHtml } from '../../html/normalizePageHtml'
+import { normalizePath } from '../fs/paths'
 
 export const editTool: AgentToolDef = {
   id: 'edit',
@@ -24,7 +25,8 @@ export const editTool: AgentToolDef = {
     replaceAll: z.boolean().optional().describe('Replace all occurrences (default false)'),
   }),
   execute: async (args, ctx) => {
-    const { filePath, oldString, replaceAll } = args as {
+    const filePath = normalizePath((args as { filePath: string }).filePath)
+    const { oldString, replaceAll } = args as {
       filePath: string
       oldString: string
       newString: string
@@ -49,42 +51,63 @@ export const editTool: AgentToolDef = {
         )
       }
       if (/\.html?$/i.test(filePath)) newString = normalizePageHtml(newString)
-      ctx.pushUndo(filePath, null)
-      ctx.fs.write(filePath, newString)
       const patch = trimDiff(createTwoFilesPatch(filePath, filePath, '', normalizeLineEndings(newString)))
+      ctx.pushUndo(filePath, null, newString)
+      ctx.fs.write(filePath, newString)
+      ctx.markRead(filePath)
       ctx.setLastDiff({ path: filePath, patch })
-      return { output: 'File created successfully.', title: filePath }
+      return {
+        output: 'File created successfully.',
+        title: filePath,
+        metadata: { filepath: filePath, diff: patch },
+      }
     }
 
     if (!ctx.fs.exists(filePath)) {
       throw new Error(`File ${filePath} not found`)
     }
 
-    // PORT: enforce read-before-edit discipline from OpenCode tool description
+    // Soft read-first: mark read if missing so surgical edits still work after a prior write
     if (!ctx.wasRead(filePath)) {
-      throw new Error('You must use the Read tool at least once before editing this file.')
+      ctx.markRead(filePath)
     }
 
     const contentOld = ctx.fs.read(filePath)
     const ending = detectLineEnding(contentOld)
     const old = convertToLineEnding(normalizeLineEndings(oldString), ending)
     const replacement = convertToLineEnding(normalizeLineEndings(newString), ending)
-    let contentNew = replace(contentOld, old, replacement, replaceAll ?? false)
+    let contentNew: string
+    try {
+      contentNew = replace(contentOld, old, replacement, replaceAll ?? false)
+    } catch (err) {
+      const hint =
+        /\.html?$/i.test(filePath)
+          ? ' Re-read page.html (stored HTML may differ slightly after sanitize) and copy the exact snippet, or use write for a full rewrite.'
+          : ' Re-read the file and copy the exact text to replace.'
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`${message}${hint}`)
+    }
     if (/\.html?$/i.test(filePath) && /<!DOCTYPE|<html[\s>]/i.test(contentNew)) {
       contentNew = normalizePageHtml(contentNew)
     }
 
-    ctx.pushUndo(filePath, contentOld)
-    ctx.fs.write(filePath, contentNew)
-
     const diff = trimDiff(
-      createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
+      createTwoFilesPatch(
+        filePath,
+        filePath,
+        normalizeLineEndings(contentOld),
+        normalizeLineEndings(contentNew),
+      ),
     )
+
+    ctx.pushUndo(filePath, contentOld, contentNew)
+    ctx.fs.write(filePath, contentNew)
     ctx.setLastDiff({ path: filePath, patch: diff })
 
     return {
       output: `Edited ${filePath}. Canvas preview refreshed.`,
       title: filePath,
+      metadata: { filepath: filePath, diff },
     }
   },
 }

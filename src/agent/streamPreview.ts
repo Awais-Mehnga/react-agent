@@ -15,6 +15,15 @@ export function extractPartialJsonString(buf: string, key: string): string | nul
     const c = buf[i]!
     if (c === '\\' && i + 1 < buf.length) {
       const n = buf[i + 1]!
+      // \uXXXX escapes (models sometimes emit < as \u003c)
+      if (n === 'u' && i + 5 < buf.length) {
+        const hex = buf.slice(i + 2, i + 6)
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += 6
+          continue
+        }
+      }
       const map: Record<string, string> = {
         n: '\n',
         r: '\r',

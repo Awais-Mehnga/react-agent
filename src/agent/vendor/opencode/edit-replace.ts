@@ -387,6 +387,24 @@ export const TrimmedBoundaryReplacer: Replacer = function* (content, find) {
   }
 }
 
+/** Match HTML snippets where tag-boundary whitespace differs (common after sanitize / pretty-print). */
+export const HtmlFlexibleReplacer: Replacer = function* (content, find) {
+  if (!find.includes("<") || find.length < 8) return
+  const escaped = find
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/>\s+</g, ">\\s*<")
+    .replace(/\s+/g, "\\s+")
+  try {
+    const re = new RegExp(escaped)
+    const match = content.match(re)
+    if (match?.[0] && match[0].length <= Math.max(find.length * 4, find.length + 800)) {
+      yield match[0]
+    }
+  } catch {
+    // invalid pattern — skip
+  }
+}
+
 export const ContextAwareReplacer: Replacer = function* (content, find) {
   const findLines = find.split("\n")
   if (findLines.length < 3) {
@@ -500,6 +518,7 @@ export function replace(content: string, oldString: string, newString: string, r
     WhitespaceNormalizedReplacer,
     IndentationFlexibleReplacer,
     EscapeNormalizedReplacer,
+    HtmlFlexibleReplacer,
     TrimmedBoundaryReplacer,
     ContextAwareReplacer,
     MultiOccurrenceReplacer,
